@@ -1,0 +1,68 @@
+{
+  "manifest_version": 3,
+  "name": "Paper Route",
+  "short_name": "Paper Route",
+  "version": "0.1.0",
+  "description": "Delta-neutral papertrade ↔ Hyperliquid hedging that follows papertrade's queue, with a Hyperliquid order-flow overlay. By Wayfinder.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq+xlxhFWaNHenP3HeNLwVtHxB9GZgYYLSf8RUeIXmyfzFddx1FfDoFp7mZdx08QjIHDQf/Bs60qeEiX/8wWMIeGbDc1bEOO0mu5eG1VWYDjAxSPExKyNSSIDUBjTYzPsovKNahHW+eGqQP1Kqm28R7zEXc42d7C9B9PNnxgIEMmVLzetw6CBfAp64okqG9H5U2pCqdcimGxTSnv4pwHnOVNRCcLmJs/8I9wYW5xLbafAc5gjs6PgwSJQjlydYmmCaYHdWFgGosEP1nEfWIy+cgN+RISLgbYACHXr/CTjC81ShaUB7Cs3A5g2wOsEhcxsJEWw3d5NzxfkGIGI0Ni1twIDAQAB",
+  "icons": {
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  },
+  "action": {
+    "default_title": "Paper Route",
+    "default_popup": "options.html"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://exchange.papertrade.xyz/*",
+    "https://api.hyperliquid.xyz/*",
+    "wss://api.hyperliquid.xyz/*",
+    "https://api.hyperliquid-testnet.xyz/*",
+    "wss://api.hyperliquid-testnet.xyz/*",
+    "https://rpc.hyperliquid.xyz/*",
+    "https://wayfinder.ai/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://exchange.papertrade.xyz/*"
+      ],
+      "js": [
+        "chart-bridge.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://exchange.papertrade.xyz/*"
+      ],
+      "js": [
+        "content.js",
+        "hedge-ui.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "hud.css",
+        "assets/GeneralSans-Variable.woff2"
+      ],
+      "matches": [
+        "https://exchange.papertrade.xyz/*"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,125 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Paper Route</title>
+  <style>
+    @font-face { font-family: "GeneralSans"; src: url("assets/GeneralSans-Variable.woff2") format("woff2"); font-weight: 200 700; }
+    :root {
+      --page: #101012; --panel: #1a1a1b;
+      --fg: oklch(0.965 0.005 180); --muted: oklch(0.72 0.018 180);
+      --primary: oklch(0.88 0.17 140); --primary-fg: oklch(0.13 0.012 200);
+      --down: #f07575; --amber: oklch(0.82 0.14 75);
+      --line: oklch(1 0 0 / 0.05); --surface-1: oklch(1 0 0 / 0.04); --surface-2: oklch(1 0 0 / 0.06); --surface-3: oklch(1 0 0 / 0.1);
+      --ease: cubic-bezier(0.2, 0, 0, 1);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; width: 440px; padding: 12px; display: flex; flex-direction: column; gap: 10px;
+      font: 400 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: -0.005em;
+      -webkit-font-smoothing: antialiased; color: var(--fg); background: var(--page);
+    }
+    header { display: flex; align-items: center; gap: 10px; padding: 4px 4px 2px; }
+    header img { width: 28px; height: 28px; border-radius: 8px; }
+    header b { display: block; font: 600 16px/1.2 "GeneralSans", system-ui, sans-serif; }
+    header span { color: var(--muted); font-size: 12px; }
+    .panel { background: var(--panel); border-radius: 14px; box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.07), inset 0 0 0 1px oklch(1 0 0 / 0.06); overflow: hidden; }
+    .panel-h { display: flex; justify-content: space-between; align-items: center; height: 36px; padding: 0 12px; box-shadow: inset 0 -1px 0 var(--line); }
+    .cap { font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .panel-b { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+    input, select {
+      width: 100%; height: 40px; padding: 0 12px; border: 0; border-radius: 10.5px; outline: none;
+      background: var(--surface-2); color: var(--fg); font: 400 14px ui-sans-serif, system-ui, sans-serif;
+      transition: box-shadow 150ms var(--ease);
+    }
+    input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    input::placeholder { color: var(--muted); }
+    input:focus, select:focus { box-shadow: inset 0 0 0 1px oklch(0.88 0.17 140 / 0.5); }
+    select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 16px) 18px, calc(100% - 11px) 18px; background-size: 5px 5px; background-repeat: no-repeat; }
+    .check { flex-direction: row; align-items: center; gap: 8px; font-size: 14px; color: var(--fg); cursor: pointer; }
+    .check input { width: 16px; height: 16px; accent-color: oklch(0.88 0.17 140); }
+    .hint { font-size: 12px; color: var(--muted); margin: 0; }
+    .row { display: flex; gap: 6px; }
+    button {
+      flex: 1; height: 36px; padding: 0 12px; border: 0; border-radius: 10.5px; cursor: pointer;
+      font: 500 14px ui-sans-serif, system-ui, sans-serif; color: var(--fg); background: var(--surface-2);
+      transition: background-color 150ms var(--ease), filter 150ms var(--ease), scale 150ms var(--ease);
+    }
+    button:hover { background: var(--surface-3); }
+    button:active { scale: 0.97; }
+    button.primary { background: var(--primary); color: var(--primary-fg); }
+    button.primary:hover { filter: brightness(1.06); background: var(--primary); }
+    .result { font-size: 12px; min-height: 18px; font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
+    .ok { color: var(--primary); } .bad { color: var(--down); }
+    .note { padding: 8px 10px; border-radius: 10.5px; font-size: 12px; color: var(--amber); background: oklch(0.82 0.14 75 / 0.08); }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="assets/icon48.png" alt="" />
+    <div><b>Paper Route</b><span>papertrade ↔ Hyperliquid, by Wayfinder</span></div>
+  </header>
+
+  <div class="panel">
+    <div class="panel-h"><span class="cap">Hedge</span><span class="hint">Hyperliquid</span></div>
+    <div class="panel-b">
+      <div class="grid">
+        <label>Papertrade wallet<input id="ptWallet" class="mono" spellcheck="false" placeholder="0x…" /></label>
+        <label>Hedge wallet<input id="hedgeWallet" class="mono" spellcheck="false" placeholder="0x…" /></label>
+        <label>Network<select id="network"><option value="mainnet">Mainnet</option><option value="testnet">Testnet</option></select></label>
+        <label>Tether band ($)<input id="bandUsd" type="number" min="10" /></label>
+        <label>Slippage (bps)<input id="slippageBps" type="number" min="1" max="200" /></label>
+        <label>Max order ($)<input id="maxOrderUsd" type="number" min="10" /></label>
+        <label>Max hedge position ($)<input id="maxPositionUsd" type="number" min="10" /></label>
+        <label>Papertrade margin / round ($)<input id="roundMarginUsd" type="number" min="1" /></label>
+        <label>HL liq buffer (× bust)<input id="marginK" type="number" min="1" step="0.5" /></label>
+      </div>
+      <p class="hint">The market (BTC or ETH) follows the papertrade page you're on. Leave the papertrade wallet empty to use the account signed in on papertrade.</p>
+      <label class="check"><input id="safetyNet" type="checkbox" /> Safety net: rest a Hyperliquid close at each papertrade position's liquidation price (works with Chrome closed)</label>
+      <label class="check"><input id="builderFee" type="checkbox" /> Wayfinder builder fee (0.02% of hedge order notional on Hyperliquid)</label>
+      <div class="row"><button id="saveHedge" class="primary">Save hedge settings</button><button id="reset">Reset HUD position</button></div>
+      <div id="result" class="result"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-h"><span class="cap">Main key</span><span class="hint" id="mainStatus">—</span></div>
+    <div class="panel-b">
+      <p class="hint">The hedge wallet's key (or a Wayfinder <code>wk_</code> key). Needed for transfers and one-time approvals. Stored encrypted with your passphrase; unlocking keeps it usable for the window you pick, across reloads and restarts.</p>
+      <div class="grid">
+        <label>Mode<select id="mode"><option value="wayfinder">Wayfinder API key</option><option value="key">Raw private key</option></select></label>
+        <label>Key<input id="secret" class="mono" type="password" spellcheck="false" autocomplete="off" placeholder="wk_… or 0x…" /></label>
+        <label>Passphrase<input id="passphrase" type="password" autocomplete="new-password" placeholder="8+ characters" /></label>
+        <label>Keep unlocked for<select id="unlockHours"><option value="1">1 hour</option><option value="8" selected>8 hours</option><option value="24">24 hours</option><option value="168">7 days</option></select></label>
+      </div>
+      <div class="note">Wayfinder mode needs a strategy or policy wallet. Session wallets expire after 15 minutes and an API key can't refresh them. A raw key must belong to the hedge wallet above.</div>
+      <div class="row">
+        <button id="storeKey" class="primary">Store key</button>
+        <button id="unlockKey">Unlock</button>
+        <button id="lockKey">Lock</button>
+      </div>
+      <div class="row">
+        <button id="testKey">Test signer</button>
+        <button id="forgetKey">Forget key</button>
+      </div>
+      <div id="keyResult" class="result"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-h"><span class="cap">Trading key</span><span class="hint" id="agentStatus">—</span></div>
+    <div class="panel-b">
+      <p class="hint">A Hyperliquid API wallet created here and approved once by your main key. It places hedge orders, TP/SL and leverage on its own — it <b>cannot withdraw or transfer</b> — so it stays ready across reloads and restarts without a passphrase. Revoke any time from Hyperliquid's API page.</p>
+      <div class="row">
+        <button id="setupAgent" class="primary">Create trading key</button>
+        <button id="forgetAgent">Forget trading key</button>
+      </div>
+      <div id="agentResult" class="result"></div>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

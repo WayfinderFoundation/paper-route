@@ -1,0 +1,223 @@
+# Paper Route
+
+A Chrome extension for [papertrade](https://exchange.papertrade.xyz) that keeps an opposite position on
+[Hyperliquid](https://app.hyperliquid.xyz) for exactly as long as your papertrade position exists, and overlays
+Hyperliquid order-flow data on papertrade's chart. BTC and ETH. Built by [Wayfinder](https://wayfinder.ai).
+
+> Papertrade and Hyperliquid are separate venues with real money on both. Nothing here is financial advice.
+> Read [Risks](#risks) before you turn anything on.
+
+## What it does
+
+**Tether (delta-neutral hedging).** Papertrade takes a fee on winning trades and none on losses, so the leg you
+hold there is the one you'd rather lose with. Paper Route holds the opposite position on Hyperliquid, so the
+pair is market-neutral. Papertrade **queues** opens and closes, sometimes for minutes, so the hedge reacts to
+papertrade **fills**, never to clicks:
+
+- a queued papertrade open is not a position yet, so Hyperliquid waits for it to land;
+- a queued papertrade close keeps you exposed, so the Hyperliquid leg stays on until the close fills;
+- if the hedge drifts by more than your band (e.g. you trade papertrade by hand), it trues it up.
+
+Turn on **Tether** in the HUD and it follows every papertrade position on the coin you're viewing.
+
+**Safety net (native, on Hyperliquid).** Papertrade liquidates a position by itself, browser or not. So that the
+hedge doesn't outlive it, Paper Route rests one reduce-only trigger order on Hyperliquid per hedged papertrade
+position, at that position's liquidation (bust) price and for its size. If papertrade busts while Chrome is
+closed, Hyperliquid closes the matching hedge at the same price. The orders are kept in step as positions open,
+resize and close, and only orders Paper Route placed are ever changed. It's on by default (Settings → Safety net).
+
+**Rounds: open both legs with a stop and a take profit.** Open a papertrade position *now* or *at a set time*
+with a stop and a take profit, each 0.1 / 0.2 / 0.35 / 1 %, any custom % from papertrade's fill price, or off.
+The Hyperliquid leg opens when the papertrade open fills and closes when the papertrade close fills.
+
+Papertrade has no stop or take-profit orders, so **these levels are not placed on either exchange**. Paper Route
+watches Hyperliquid's mid (which papertrade tracks to under 1 bp) and, when a level is hit, clicks papertrade's
+own Close button. See [Keep it running](#keep-it-running). A level is a trigger, not a price guarantee: the close
+fills at whatever papertrade gives after its queue.
+
+Rounds are saved and pick up where they left off after a dropped stream, an API error or a browser restart.
+A click whose reply was lost is never sent twice, and a queued order is never re-sent.
+
+**Sizing.** The max size shown is the most both venues can carry right now: papertrade balance × leverage,
+papertrade's open-interest room and position cap on that side, your own max order / max position settings,
+and Hyperliquid's free margin at your chosen leverage.
+
+**Balances.** Live P&L for both legs (papertrade after its win fee), papertrade bust vs Hyperliquid liquidation
+distance, and a rebalance suggestion that keeps Hyperliquid's liquidation a set multiple further away than
+papertrade's bust. One click sends USDC from Hyperliquid to your papertrade deposit address.
+
+**Order-flow overlay.** A HUD and chart layer built only from Hyperliquid's public websocket (order book,
+trades, open interest, funding):
+- the components: microprice, book imbalance, order-flow imbalance, taker flow, momentum, open-interest change
+  and mark vs mid;
+- a volatility regime;
+- a combined **order-flow index**, with its expected move over the next 10–60 s drawn on the chart.
+
+See [Does it work?](#does-it-work) for how much that's worth. The chart also shows your round's entry, stop and
+limit, papertrade's bust price and Hyperliquid's liquidation price.
+
+Everything runs in your browser. There is no Paper Route server.
+
+## Keep it running
+
+Everything Paper Route manages (stops, take profits, scheduled rounds, Tether) runs **in your browser**. While a
+round is open or Tether is holding a position:
+
+- **Keep Chrome open and Paper Route enabled.** The toolbar icon shows **ON** and the HUD shows an amber banner
+  while Paper Route is responsible for positions. Closing or reloading the papertrade tab asks you to confirm.
+- **The papertrade tab can be closed** as long as Chrome is open: when a stop, take profit or scheduled open comes
+  due, Paper Route opens papertrade in a background tab and acts there (papertrade stays signed in). Leaving a
+  papertrade tab open, and visible, is still faster: Chrome slows down background tabs.
+- **If Chrome is closed, the laptop sleeps or the extension is off, nothing is watched.** Both legs stay open,
+  so you remain hedged, but no stop or take profit fires and papertrade's bust is the only stop on that side.
+  If papertrade does bust, the [safety net](#what-it-does) closes the hedge on Hyperliquid at the same price.
+  When Paper Route comes back it checks Hyperliquid's 1-minute candles for the time it was away; if a level
+  traded meanwhile it closes the round straight away and tells you. A scheduled round whose open time passed
+  while it was off is skipped, not opened late.
+
+## Install
+
+1. Download `paper-route-<version>.zip` from the [latest release](../../releases/latest) and unzip it somewhere
+   permanent (e.g. `~/Extensions/paper-route`). Chrome loads it from that folder, so don't delete it.
+2. Open `chrome://extensions`, switch on **Developer mode** (top right), click **Load unpacked** and pick the
+   unzipped `paper-route-<version>` folder.
+3. Pin Paper Route from the puzzle-piece menu and click it to open the settings.
+4. Open [papertrade](https://exchange.papertrade.xyz/trade/btc) and sign in. The HUD appears top-left; drag it
+   anywhere, collapse it, or hide it with **Alt+W**.
+
+### Set up hedging
+
+1. **Hedge wallet**: your Hyperliquid account address. The papertrade wallet is picked up from the account
+   you're signed in with on papertrade (or type one in).
+2. **Main key**: the Hyperliquid account's private key, or a [Wayfinder](https://wayfinder.ai) API key for a
+   strategy/policy wallet. It's encrypted with your passphrase in the extension's storage and is only needed
+   for transfers and one-time approvals. You can keep it unlocked for 1 hour up to 7 days.
+3. **Create trading key**: generates a Hyperliquid API wallet inside the extension and approves it with your
+   main key. It can place orders and set leverage but **cannot withdraw or transfer**, so it stays ready
+   without a passphrase. Hyperliquid expires it after 180 days (create a new one then), and you can revoke it
+   any time on Hyperliquid's API page.
+4. Pick the Hyperliquid leverage in the HUD, then turn on **Tether** or open a round.
+
+The market follows the papertrade page: `/trade/btc` hedges BTC, `/trade/eth` hedges ETH. While a round
+is running, or Tether is holding an open position, Paper Route stays on that coin until it's flat.
+
+### Fees
+
+Hedge market orders on Hyperliquid carry Wayfinder's builder fee of **0.02 %** of order notional (2 bp), on top
+of Hyperliquid's own trading fee, so a hedge that opens and closes pays it twice. You approve it once (capped at
+0.02 %); you can switch it off in settings.
+
+## Update
+
+**From a release zip:**
+1. Download the new zip and unzip it. Replacing the old folder is tidiest.
+2. In `chrome://extensions`, click the reload icon on Paper Route. If you unzipped to a new folder, remove the
+   old copy and **Load unpacked** the new one instead.
+3. Refresh papertrade.
+
+The extension ID is fixed, so your encrypted key, trading key, settings and saved rounds carry over either way.
+Don't load two versions at once.
+
+**From source:** `git pull && npm ci && npm run build`, then reload the extension.
+
+## Build from source
+
+```bash
+git clone https://github.com/WayfinderFoundation/paper-route.git
+cd paper-route
+npm ci
+npm run build          # dev build into dist/; load the repo folder unpacked (auto-reloads on file changes)
+npm test               # offline tests: round state machine, capacity maths, order idempotency, flow features
+npm run build:release  # release/paper-route-<version>.zip (refuses to package anything that looks like a key)
+```
+
+Releases are built by GitHub Actions from a `v*` tag that matches `manifest.json`'s version.
+
+## Does it work?
+
+The order-flow index is a linear combination of seven Hyperliquid features, fitted to predict the BTC
+Hyperliquid mid's move over the next 10, 30 and 60 seconds:
+
+| Feature | What it measures | Weight per 1 sd (10 s / 30 s / 60 s, bp) |
+|---|---|---|
+| `mark_mid_bps` | Hyperliquid mark price vs the book mid | +0.23 / +0.24 / +0.26 |
+| `imb10` | Size imbalance over the top 10 book levels | +0.16 / +0.20 / +0.24 |
+| `imb5` | Size imbalance over the top 5 book levels | +0.12 / +0.21 / +0.25 |
+| `flowz_5s` | Taker buys − sells over 5 s, vs its 10-minute typical size | +0.16 / +0.17 / +0.16 |
+| `ofi_5s` | Order-flow imbalance at the top of book over 5 s | +0.14 / +0.15 / +0.13 |
+| `ret_5s` | Mid change over the last 5 s | +0.12 / +0.11 / +0.11 |
+| `micro_bps` | Size-weighted microprice vs mid | +0.10 / +0.11 / +0.10 |
+
+Funding, oracle vs mid, open-interest change, longer flow and momentum windows, and 1 s / 30 s OFI were
+tested and added nothing, so they're shown in the HUD but carry no weight.
+
+**BTC, fitted on 87 days (2026-07-04 to 09-28), scored on the next 14 days it never saw (09-29 to 10-12),
+1.08 M one-second samples.** IC is the correlation between the index's expected move and what happened next,
+with 95 % confidence intervals from resampling whole days:
+
+| Horizon | IC | IC if you act 2 s later | Top-decile mean move | Sign right (non-zero moves) |
+|---|---|---|---|---|
+| 10 s | 0.30 [0.28, 0.32] | 0.19 [0.18, 0.21] | +0.97 bp | 72 % |
+| 30 s | 0.20 [0.19, 0.22] | 0.14 [0.13, 0.16] | +1.17 bp | 63 % |
+| 60 s | 0.15 [0.14, 0.17] | 0.11 [0.10, 0.12] | +1.23 bp | 59 % |
+
+By volatility regime (10-minute realised vol of 1 s returns; calm < 0.28 bp, wild ≥ 0.49 bp), the 10 s IC is
+0.36 calm, 0.39 normal and 0.28 wild. It's weakest when markets are moving fast, which is also when acting late
+costs the most.
+
+What this means in practice:
+
+- **It's real but small.** Even the strongest decile expects about 1 bp, well inside a taker round trip on
+  Hyperliquid, so it doesn't pay for itself as a standalone strategy. Read it as a lean (which way the next few
+  ticks are likelier to go), not as a trading signal.
+- **Speed matters.** About 46 % of 10 s moves are exactly zero (BTC sits on one tick), and much of the 10 s skill
+  is the next tick. Acting 2 s late removes a third of it.
+- **ETH is provisional.** There are only ~18 hours of ETH order-book history so far, so ETH uses BTC's weights
+  re-scaled to ETH's own feature ranges. On those hours its 10 / 30 / 60 s IC was 0.27 / 0.17 / 0.13. The HUD
+  marks ETH as provisional until it has its own fit.
+- The features need about 10 minutes of data after a page load (the taker-flow z-score and the volatility regime
+  use 10-minute windows); until then the HUD says it's warming up and missing features count as neutral.
+
+Every feature is computed in your browser exactly as in the fit: `test/parity.mjs` replays 20 minutes of
+recorded rows through the extension's engine and matches the features computed in the fit to about 1e-6 and its
+index to about 1e-4. Formulas are at the top of `src/flowindex.js`; weights are in `src/index-weights.json`.
+
+## How it works
+
+| File | Role |
+|---|---|
+| `src/hedge.js` | Hedge engine: papertrade account stream, Hyperliquid account polling, tether, rebalancing, key handling |
+| `src/rounds.js` | Round state machine: `scheduled → opening → hedging → live → closing → flattening → done` |
+| `src/papertrade.js` | Papertrade public endpoints: account stream, trading limits, open-interest room, win fee, deposit address |
+| `src/hl.js` | Hyperliquid client: idempotent orders (cloid + status check), leverage, transfers, approvals |
+| `src/capacity.js` | Max size both venues can carry |
+| `src/market.js`, `src/flowindex.js` | Hyperliquid websocket → order-flow features and index (pure, tested) |
+| `src/vault.js` | Passphrase-encrypted key storage (non-extractable device key + AES-GCM) |
+| `content.js`, `hedge-ui.js` | HUD and chart layer; papertrade orders go through papertrade's own ticket and Close buttons |
+| `chart-bridge.js` | Reads papertrade's chart price/time mapping from its canvas draws (it has no public chart API) |
+
+Papertrade has no trading API you can sign for, so orders are placed by filling in papertrade's own order ticket
+and clicking its buttons in your signed-in tab. Keep a papertrade tab open (and preferably visible: Chrome
+throttles hidden tabs) while a round or Tether is running.
+
+## Risks
+
+- **Papertrade queue.** Opens and closes can wait minutes. While a close is queued you hold both the papertrade
+  side and the hedge, so you stay neutral, but a stop fills only when the queue gets to it.
+- **Safety-net edge cases.** Hyperliquid triggers on its mark price, papertrade busts on Hyperliquid's mid at its
+  block time. At the very edge one can happen without the other; with Chrome open, Tether or the round re-hedges
+  straight away, with Chrome closed the pair stays one-sided until you're back.
+- **Liquidation mismatch.** Papertrade busts at about `1/leverage` from entry; Hyperliquid liquidates at its own
+  margin level. Keep Hyperliquid's liquidation well beyond papertrade's bust (the HUD shows both and a
+  suggested balance).
+- **Browser dependence.** Hedging, stops and take profits run in your browser. See
+  [Keep it running](#keep-it-running).
+- **A failed round.** If papertrade drops or never fills a round's open, the round fails without touching
+  Hyperliquid. If that open lands later anyway, only Tether (when it's on) will hedge it.
+- **Keys.** Your main key is encrypted with your passphrase; anyone with your unlocked browser profile can use it
+  for the unlock window. The trading key can trade but not withdraw.
+- **Index.** The order-flow index is a short-horizon statistical lean, not a signal that covers fees on its own.
+
+## License
+
+MIT

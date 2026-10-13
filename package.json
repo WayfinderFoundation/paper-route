@@ -1,0 +1,19 @@
+{
+  "name": "paper-route",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:release": "node scripts/build.mjs --release",
+    "test": "node test/run.mjs"
+  },
+  "dependencies": {
+    "@nktkas/hyperliquid": "0.32.2",
+    "viem": "2.51.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  },
+  "version": "0.1.0",
+  "license": "MIT"
+}
