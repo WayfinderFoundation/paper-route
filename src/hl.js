@@ -13,8 +13,8 @@ const BUILDER_MAX_FEE_RATE = "0.02%";
 const MIN_ORDER_USD = 10;
 const TRIGGER_SLIPPAGE = 0.1; // market TP/SL limit price band, as HL's frontend uses
 
-export function createHl({ testnet }) {
-  const transport = new HttpTransport({ isTestnet: testnet, timeout: 8000 });
+export function createHl() {
+  const transport = new HttpTransport({ timeout: 8000 });
   const info = new InfoClient({ transport });
   let perpMeta = null; // coin -> { asset, szDecimals, maxLeverage }
   let usdcToken = null;
@@ -207,7 +207,7 @@ export function createHl({ testnet }) {
 
   // Low-latency mids over HL's websocket (auto-reconnects and re-subscribes).
   async function subscribeMid(coin, onMid) {
-    const ws = new WebSocketTransport({ isTestnet: testnet });
+    const ws = new WebSocketTransport();
     const sub = await new SubscriptionClient({ transport: ws }).allMids((e) => {
       const v = Number(e.mids[coin]);
       if (v > 0) onMid(v);

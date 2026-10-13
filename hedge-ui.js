@@ -18,7 +18,7 @@
   card.innerHTML = `
     <div class="sec-h hedge-h" data-act="toggle">
       <span class="cap">Tether · Hyperliquid</span>
-      <span class="hx-chips"><span class="badge hx-net" hidden>Testnet</span><span class="badge hx-signer">—</span></span>
+      <span class="hx-chips"><span class="badge hx-signer">—</span></span>
     </div>
     <div class="hx-body">
       <div class="hx-lev">
@@ -381,7 +381,7 @@
 
   const q = (s) => card.querySelector(s);
   const ui = Object.fromEntries(
-    ["hx-signer", "hx-net", "hx-empty", "hx-main", "hx-pt", "hx-hl", "hx-dtext", "hx-pct", "hx-auto", "hx-ptpnl", "hx-hlpnl", "hx-net-pnl", "hx-bust", "hx-liq", "hx-ptav", "hx-ptq", "hx-hleq", "hx-hlw", "hx-sugg", "hx-amt", "hx-confirm", "hx-confirm-t", "hx-unlock", "hx-pass", "hx-alerts", "hx-levs", "hx-mode", "hx-plan", "hx-netline"].map((c) => [c, q(`.${c}`)]),
+    ["hx-signer", "hx-empty", "hx-main", "hx-pt", "hx-hl", "hx-dtext", "hx-pct", "hx-auto", "hx-ptpnl", "hx-hlpnl", "hx-net-pnl", "hx-bust", "hx-liq", "hx-ptav", "hx-ptq", "hx-hleq", "hx-hlw", "hx-sugg", "hx-amt", "hx-confirm", "hx-confirm-t", "hx-unlock", "hx-pass", "hx-alerts", "hx-levs", "hx-mode", "hx-plan", "hx-netline"].map((c) => [c, q(`.${c}`)]),
   );
   const deltaFill = q(".hx-delta .bar i");
   const hedgeBtn = q('[data-act="hedge"]');
@@ -612,7 +612,6 @@
     const canTrade = agentOk || v.unlocked;
     ui["hx-signer"].textContent = agentOk ? "Trading key" : v.unlocked ? (v.mode === "wayfinder" ? "Wayfinder" : "Main key") : v.remembered ? "Locked" : "No key";
     ui["hx-signer"].className = `badge hx-signer ${canTrade ? "up" : "warn"}`;
-    ui["hx-net"].hidden = s.settings.network !== "testnet";
     ui["hx-unlock"].hidden = v.unlocked || !v.remembered;
 
     if (s.lockedBy) {

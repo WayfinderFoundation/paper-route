@@ -4,7 +4,7 @@
   "short_name": "Paper Route",
   "version": "0.1.0",
   "description": "Delta-neutral papertrade ↔ Hyperliquid hedging that follows papertrade's queue, with a Hyperliquid order-flow overlay. By Wayfinder.",
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq+xlxhFWaNHenP3HeNLwVtHxB9GZgYYLSf8RUeIXmyfzFddx1FfDoFp7mZdx08QjIHDQf/Bs60qeEiX/8wWMIeGbDc1bEOO0mu5eG1VWYDjAxSPExKyNSSIDUBjTYzPsovKNahHW+eGqQP1Kqm28R7zEXc42d7C9B9PNnxgIEMmVLzetw6CBfAp64okqG9H5U2pCqdcimGxTSnv4pwHnOVNRCcLmJs/8I9wYW5xLbafAc5gjs6PgwSJQjlydYmmCaYHdWFgGosEP1nEfWIy+cgN+RISLgbYACHXr/CTjC81ShaUB7Cs3A5g2wOsEhcxsJEWw3d5NzxfkGIGI0Ni1twIDAQAB",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArKHUgPIOxsaWIdDmhLBWz7772QwtvIxNP6IssGnaEfLblSyAbzPOIcVpoeA1nqu8D9rAZpMCr4kg21UCX60obR986LR1EK7zwxoY/MRGVQ1U1+dooqLU0/NPUTsuMpleXwTpAqpbaLMuWS77Z5krYQbvMvOc+qeEfCggnMvVZTmNXqCqAqj1u+lUAbX79hed1GlIssVAXGms27R8k9bheArVRFfPb7Giu/AMy8k4sEWaZI/JayBdrhBXLa99Oxz7ksAxu0eW0Rp+iOHFumKd9ymYV2LjFqQerA6B4iJyr4mq+8/6WORT1z6iaXbqYXObemb4JJpRX6NV24g3zB02VwIDAQAB",
   "icons": {
     "16": "assets/icon16.png",
     "48": "assets/icon48.png",
@@ -27,8 +27,6 @@
     "https://exchange.papertrade.xyz/*",
     "https://api.hyperliquid.xyz/*",
     "wss://api.hyperliquid.xyz/*",
-    "https://api.hyperliquid-testnet.xyz/*",
-    "wss://api.hyperliquid-testnet.xyz/*",
     "https://rpc.hyperliquid.xyz/*",
     "https://wayfinder.ai/*"
   ],

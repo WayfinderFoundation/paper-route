@@ -539,7 +539,7 @@ export function createHedgeEngine({ publish, exec }) {
     if (sessionWallet === null) sessionWallet = (await chrome.storage.local.get("ptSessionWallet")).ptSessionWallet ?? null;
     if (pageCoin === null) pageCoin = (await chrome.storage.local.get("ptPageCoin")).ptPageCoin ?? null;
     await (roundsReady ??= rounds.init());
-    settings = { ...HEDGE_DEFAULTS, ...next };
+    settings = { ...HEDGE_DEFAULTS, ...next, network: "mainnet" }; // papertrade runs on mainnet prices only
     settings.coin = rounds.lockedCoin() ?? pageCoin ?? settings.coin;
     if (!settings.ptWallet && sessionWallet) {
       settings.ptWallet = sessionWallet;
@@ -564,7 +564,7 @@ export function createHedgeEngine({ publish, exec }) {
     await refreshLimits();
     limitsTimer = setInterval(refreshLimits, LIMITS_POLL_MS);
     if (!settings.hedgeWallet) return;
-    hl = createHl({ testnet: settings.network === "testnet" });
+    hl = createHl();
     const meta = await hl.loadMeta();
     szDecimals = meta[settings.coin].szDecimals;
     maxLeverage = meta[settings.coin].maxLeverage;

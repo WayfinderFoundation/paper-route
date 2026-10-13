@@ -11,8 +11,8 @@ document.getElementById("reset").addEventListener("click", async () => {
 });
 
 // ---------- hedge ----------
-const HEDGE_FIELDS = ["ptWallet", "hedgeWallet", "network", "bandUsd", "slippageBps", "maxOrderUsd", "maxPositionUsd", "roundMarginUsd", "marginK", "builderFee", "safetyNet"];
-const HEDGE_DEFAULTS = { network: "mainnet", slippageBps: 30, bandUsd: 50, maxOrderUsd: 25000, maxPositionUsd: 50000, builderFee: true, marginK: 3, roundMarginUsd: 100, safetyNet: true };
+const HEDGE_FIELDS = ["ptWallet", "hedgeWallet", "bandUsd", "slippageBps", "maxOrderUsd", "maxPositionUsd", "roundMarginUsd", "marginK", "builderFee", "safetyNet"];
+const HEDGE_DEFAULTS = { slippageBps: 30, bandUsd: 50, maxOrderUsd: 25000, maxPositionUsd: 50000, builderFee: true, marginK: 3, roundMarginUsd: 100, safetyNet: true };
 const $id = (id) => document.getElementById(id);
 const keyResult = $id("keyResult");
 
@@ -65,7 +65,7 @@ async function refreshStatus() {
   try {
     const v = await hedgeCmd("vaultStatus");
     $id("mainStatus").textContent = !v.remembered ? "Not set" : v.unlocked ? `Unlocked until ${fmtUntil(v.unlockedUntil)}` : "Locked";
-    $id("agentStatus").textContent = v.agent ? `${v.agent.address.slice(0, 6)}…${v.agent.address.slice(-4)} · ${v.agent.network} · until ${new Date(v.agent.validUntil).toLocaleDateString()}` : "Not set up";
+    $id("agentStatus").textContent = v.agent ? `${v.agent.address.slice(0, 6)}…${v.agent.address.slice(-4)} · until ${new Date(v.agent.validUntil).toLocaleDateString()}` : "Not set up";
   } catch {
     $id("mainStatus").textContent = "—";
   }

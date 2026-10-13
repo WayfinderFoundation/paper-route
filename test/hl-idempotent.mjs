@@ -63,7 +63,7 @@ const order = { coin: "BTC", isBuy: false, size: 0.12195, reduceOnly: false, sli
 
 // 1: request lands, response lost → orderStatus says filled → no resend
 {
-  const hl = createHl({ testnet: true });
+  const hl = createHl();
   const fill = await hl.marketOrder(signer, order);
   check(exchangeLog.length === 1, `lost response: order sent once (${exchangeLog.length})`);
   check(fill.size === 0.12195, `lost response: fill recovered from orderStatus (${fill.size} BTC)`);
@@ -74,7 +74,7 @@ const order = { coin: "BTC", isBuy: false, size: 0.12195, reduceOnly: false, sli
   exchangeLog.length = 0;
   landed.clear();
   mode = "neverLanded";
-  const hl = createHl({ testnet: true });
+  const hl = createHl();
   const fill = await hl.marketOrder(signer, order);
   check(exchangeLog.length === 2, `never landed: resent once (${exchangeLog.length} sends)`);
   check(exchangeLog[0].orders[0].c === exchangeLog[1].orders[0].c, "resend reuses the same cloid");
@@ -85,7 +85,7 @@ const order = { coin: "BTC", isBuy: false, size: 0.12195, reduceOnly: false, sli
 {
   exchangeLog.length = 0;
   mode = "rejected";
-  const hl = createHl({ testnet: true });
+  const hl = createHl();
   let err = null;
   try {
     await hl.marketOrder(signer, order);
@@ -110,7 +110,7 @@ const order = { coin: "BTC", isBuy: false, size: 0.12195, reduceOnly: false, sli
   };
   const agent = privateKeyToAccount(generatePrivateKey());
   agent.user = "0x00000000000000000000000000000000000000aa";
-  const hl = createHl({ testnet: true });
+  const hl = createHl();
   const fill = await hl.marketOrder(agent, order);
   globalThis.fetch = realFetch;
   check(exchangeLog.length === 1 && fill.size === 0.12195, "agent: lost response recovered without resending");
@@ -121,7 +121,7 @@ const order = { coin: "BTC", isBuy: false, size: 0.12195, reduceOnly: false, sli
 {
   mode = "ok";
   infoFailures = 2;
-  const hl = createHl({ testnet: true });
+  const hl = createHl();
   const m = await hl.mid("BTC");
   check(m === 82000, "allMids retried through 2 network failures");
 }

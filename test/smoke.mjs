@@ -7,7 +7,7 @@ import { verifyTypedData } from "viem";
 
 const assert = (c, m) => { if (!c) throw new Error(`FAIL: ${m}`); console.log(`ok  ${m}`); };
 
-const hl = createHl({ testnet: false });
+const hl = createHl();
 const meta = await hl.loadMeta();
 assert(meta.BTC && meta.BTC.asset === 0, `BTC meta asset=${meta.BTC.asset} szDecimals=${meta.BTC.szDecimals}`);
 const acct = await hl.account("0x0000000000000000000000000000000000000001", "BTC");
