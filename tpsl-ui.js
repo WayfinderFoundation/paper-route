@@ -14,6 +14,29 @@
   const TP_PICKS = [25, 50, 100];
   const SL_PICKS = [10, 25, 50];
 
+  // With Tether on, the papertrade leg is meant to lose: losing closes and liquidations mint PAPER
+  // (a liquidation on the full margin), and Hyperliquid's opposite side wins it back. So the loss
+  // side becomes the exit you aim for ("Bank Paper at", bust by default) and the gain side an
+  // optional early exit. With Tether off, it's an ordinary one-sided TP / SL.
+  const paperMode = () => !!eng.snap()?.auto;
+  const PAPER_PICKS = { sl: [25, 50, 75], tp: [10, 25, 50] };
+  const LABEL = {
+    std: { tp: "Take profit", sl: "Stop loss", tpOff: "Off", slOff: "Off" },
+    paper: { tp: "Win exit (TP)", sl: "Bank Paper at (SL)", tpOff: "Off", slOff: "At bust" },
+  };
+  const labels = () => LABEL[paperMode() ? "paper" : "std"];
+
+  // says which set of labels is showing, and why: they follow the Tether switch in the HUD
+  function modeLine(el) {
+    const paper = paperMode();
+    el.textContent = paper ? "Tether on" : "Tether off";
+    el.title = paper
+      ? "Set up to earn Paper. Tether hedges this on Hyperliquid, so the papertrade side is meant to lose: a losing close or a liquidation mints PAPER, and Hyperliquid's opposite side wins it back. Turn Tether off in the HUD for an ordinary take profit / stop loss."
+      : "Standard take profit / stop loss. Tether is off, so nothing is hedged on Hyperliquid. Turn Tether on in the HUD to set these up for earning Paper.";
+    el.dataset.tip = el.title;
+    el.className = `${el.className.split(" ")[0]} ${paper ? "on" : ""}`;
+  }
+
   const fmtPx = (p) => (p == null || !Number.isFinite(p) ? "" : p.toLocaleString("en-US", { maximumFractionDigits: p >= 1000 ? 1 : 2, useGrouping: false }));
   const fmtPxShow = (p) => p.toLocaleString("en-US", { maximumFractionDigits: p >= 1000 ? 1 : 2 });
   const fmtUsd = (v) => `${v < 0 ? "−" : "+"}$${Math.abs(v).toFixed(2)}`;
@@ -39,8 +62,11 @@
   function problem(side, base, price) {
     if (price == null || !base) return null;
     const right = side === "tp" ? (base.isLong ? price > base.entry : price < base.entry) : base.isLong ? price < base.entry : price > base.entry;
-    if (!right) return side === "tp" ? `Take profit must be ${base.isLong ? "above" : "below"} entry` : `Stop loss must be ${base.isLong ? "below" : "above"} entry`;
-    if (side === "sl" && base.bust && (base.isLong ? price <= base.bust : price >= base.bust)) return `Past papertrade's liquidation (${fmtPxShow(base.bust)}): it would bust first`;
+    const L = labels();
+    if (!right) return side === "tp" ? `${L.tp} must be ${base.isLong ? "above" : "below"} entry` : `${L.sl} must be ${base.isLong ? "below" : "above"} entry`;
+    if (side === "sl" && base.bust && (base.isLong ? price <= base.bust : price >= base.bust)) {
+      return paperMode() ? `Past papertrade's liquidation (${fmtPxShow(base.bust)}): pick At bust instead` : `Past papertrade's liquidation (${fmtPxShow(base.bust)}): it would bust first`;
+    }
     return null;
   }
 
@@ -52,7 +78,6 @@
     const head = document.createElement("div");
     head.className = light ? "pr-side-h" : "pe-side-h";
     const name = document.createElement("span");
-    name.textContent = side === "tp" ? "Take profit" : "Stop loss";
     const est = document.createElement("span");
     est.className = light ? "pr-est" : "pe-est";
     head.append(name, est);
@@ -74,32 +99,56 @@
     fields.append(price, amtBox);
     const picks = document.createElement("div");
     picks.className = light ? "pr-picks" : "pe-picks";
-    for (const v of side === "tp" ? TP_PICKS : SL_PICKS) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = `${v}%`;
-      b.title = `${side === "tp" ? "Take profit" : "Stop loss"} at ${v}% ${side === "tp" ? "gain" : "loss"} on margin`;
-      b.addEventListener("click", () => {
-        Object.assign(st, { edited: "amount", unit: "roe", amount: v });
-        sync();
-      });
-      picks.append(b);
-    }
     const clear = document.createElement("button");
     clear.type = "button";
-    clear.textContent = "Off";
-    clear.title = "No " + (side === "tp" ? "take profit" : "stop loss");
     clear.addEventListener("click", () => {
       Object.assign(st, { edited: null, price: null, amount: null });
       sync();
     });
-    picks.append(clear);
+    // labels, pick values and "off" wording follow the mode (see LABEL); rebuilt only when it flips
+    let mode = null;
+    function relabel() {
+      const paper = paperMode();
+      if (mode === paper) return;
+      mode = paper;
+      const L = labels();
+      name.textContent = L[side];
+      name.title = !paper
+        ? ""
+        : side === "sl"
+          ? "Where to close both legs at a papertrade loss: that loss mints PAPER while Hyperliquid's opposite side wins it back. At bust lets papertrade liquidate, which mints on the full margin."
+          : "Optional: close both legs if papertrade moves into profit instead. A winning close earns no PAPER; while hedged, the pair stays neutral if you wait.";
+      price.placeholder = paper ? "Price" : side === "tp" ? "TP price" : "SL price";
+      clear.textContent = L[`${side}Off`];
+      clear.title = !paper
+        ? `No ${L[side].toLowerCase()}`
+        : side === "sl"
+          ? "No early close: let papertrade liquidate. A liquidation mints PAPER on the full margin, and the safety net closes Hyperliquid at the same price."
+          : "Hold through papertrade gains (the pair stays neutral while you wait for it to turn)";
+      const values = paper ? PAPER_PICKS[side] : side === "tp" ? TP_PICKS : SL_PICKS;
+      picks.replaceChildren(...values.map((v) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = `${v}%`;
+        b.title = !paper
+          ? `${L[side]} at ${v}% ${side === "tp" ? "gain" : "loss"} on margin`
+          : side === "sl"
+            ? `Close both legs once papertrade is down ${v}% of margin: that loss mints PAPER`
+            : `Close both legs if papertrade gets ${v}% up on margin (a winning close earns no PAPER)`;
+        b.addEventListener("click", () => {
+          Object.assign(st, { edited: "amount", unit: "roe", amount: v });
+          sync();
+        });
+        return b;
+      }), clear);
+    }
     const warn = document.createElement("div");
     warn.className = light ? "pr-warn" : "pe-warn";
     wrap.append(head, fields, picks, warn);
 
     let getBase = () => null;
     function sync() {
+      relabel();
       const base = getBase();
       unit.textContent = st.unit === "roe" ? "%" : "$";
       if (st.edited === "price" && base) st.amount = st.price != null ? amountFrom(side, base, st.price, st.unit) : null;
@@ -107,10 +156,17 @@
       if (document.activeElement !== price) price.value = st.price != null ? fmtPx(st.price) : "";
       if (document.activeElement !== amount) amount.value = st.amount != null ? String(Math.round(st.amount * 100) / 100) : "";
       const p = st.edited ? st.price : null;
-      est.textContent = p != null && base ? `${fmtUsd(pnlAt(base, p))}${st.edited === "amount" && light ? " est." : ""}` : "";
-      est.className = `${light ? "pr-est" : "pe-est"} ${p != null && base ? (pnlAt(base, p) >= 0 ? "up" : "dn") : ""}`;
+      // in Paper mode a papertrade loss is the aim, so it reads as the good outcome
+      const pnl = p != null && base ? pnlAt(base, p) : null;
+      const paperLoss = mode && pnl != null && pnl < 0;
+      const away = pnl != null ? Math.abs(p / base.entry - 1) * 100 : null;
+      // whole dollars from $10 up keeps the label on one line in papertrade's narrow ticket
+      const usdText = pnl != null && Math.abs(pnl) >= 10 ? `${pnl < 0 ? "−" : "+"}$${Math.round(Math.abs(pnl))}` : pnl != null ? fmtUsd(pnl) : "";
+      est.textContent = pnl != null ? `${usdText} · ${away < 1 ? away.toFixed(2) : away.toFixed(1)}%` : "";
+      est.title = pnl != null ? `${fmtUsd(pnl)} on $${base.margin} margin, ${away.toFixed(2)}% from ${st.edited === "amount" && light ? "the current price (worked out from the fill price when the order fills)" : "entry"}. Higher leverage means a smaller move for the same amount.` : "";
+      est.className = `${light ? "pr-est" : "pe-est"} ${pnl != null ? (pnl >= 0 !== !!paperLoss ? "up" : "dn") : ""}`;
       warn.textContent = (st.edited && problem(side, base, p)) || "";
-      for (const b of picks.children) b.classList.toggle("on", st.edited === "amount" && st.unit === "roe" && `${st.amount}%` === b.textContent);
+      for (const b of picks.children) b.classList.toggle("on", b === clear ? !st.edited : st.edited === "amount" && st.unit === "roe" && `${st.amount}%` === b.textContent);
     }
     price.addEventListener("input", () => {
       Object.assign(st, { edited: num(price.value) == null ? null : "price", price: num(price.value) });
@@ -150,7 +206,8 @@
   // a level is a trigger, not a resting order: say so in bold wherever levels are set
   function triggerNote() {
     const b = document.createElement("b");
-    b.textContent = "These are triggers, not orders: once the price moves past your level, Paper Route sends the close, which is still subject to papertrade's queue and fill delays.";
+    b.textContent = "Triggers, not orders:";
+    b.title = "Once the price moves past your level, Paper Route sends the close, which is still subject to papertrade's queue and fill delays.";
     return b;
   }
 
@@ -166,7 +223,7 @@
     .pr-badge img { width: 14px; height: 14px; border-radius: 3px; }
     .pr-tpsl-b { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
     .pr-side { display: flex; flex-direction: column; gap: 5px; }
-    .pr-side-h { display: flex; justify-content: space-between; font-size: 12px; color: rgb(143, 134, 118); font-weight: 500; }
+    .pr-side-h { display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; font-size: 12px; color: rgb(143, 134, 118); font-weight: 500; }
     .pr-est.up { color: #2f6b3f; } .pr-est.dn { color: #8b2020; }
     .pr-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
     .pr-fields input { width: 100%; box-sizing: border-box; height: 34px; padding: 0 9px; border: 1px solid rgba(58, 53, 48, 0.18); border-radius: 8px; background: #fbf8f0; font: 13px Inter, system-ui, sans-serif; color: #2a2520; outline: none; }
@@ -175,7 +232,7 @@
     .pr-amt input { padding-right: 34px; }
     .pr-amt button { position: absolute; right: 4px; top: 4px; height: 26px; min-width: 26px; padding: 0 6px; border: 0; border-radius: 6px; background: rgba(58, 53, 48, 0.08); font: 600 12px Inter, system-ui, sans-serif; color: #2a2520; cursor: pointer; }
     .pr-picks { display: flex; gap: 4px; }
-    .pr-picks button { flex: 1; height: 24px; border: 1px solid rgba(58, 53, 48, 0.14); border-radius: 6px; background: transparent; font: 500 11px Inter, system-ui, sans-serif; color: rgb(110, 102, 90); cursor: pointer; }
+    .pr-picks button { flex: 1; min-width: 0; padding: 0 2px; white-space: nowrap; height: 24px; border: 1px solid rgba(58, 53, 48, 0.14); border-radius: 6px; background: transparent; font: 500 11px Inter, system-ui, sans-serif; color: rgb(110, 102, 90); cursor: pointer; }
     .pr-picks button.on { border-color: #8b2020; color: #8b2020; background: rgba(139, 32, 32, 0.06); }
     .pr-warn { font-size: 11.5px; color: #8b2020; }
     .pr-warn:empty { display: none; }
@@ -188,6 +245,10 @@
     .pr-chip img { width: 12px; height: 12px; border-radius: 3px; }
     .pr-chip .tp { color: #2f6b3f; } .pr-chip .sl { color: #8b2020; }
     .pr-chip.add { color: rgb(110, 102, 90); border-style: dashed; }
+    .pr-mode { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: 500; white-space: nowrap; color: rgb(110, 102, 90); background: rgba(58, 53, 48, 0.07); cursor: help; }
+    .pr-mode::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: rgba(58, 53, 48, 0.35); }
+    .pr-mode.on { color: #2f6b3f; background: rgba(47, 107, 63, 0.1); }
+    .pr-mode.on::before { background: #2f6b3f; }
   `;
   document.head.append(style);
 
@@ -204,8 +265,12 @@
   badge.className = "pr-badge";
   const badgeImg = document.createElement("img");
   badgeImg.src = ICON;
-  badge.append(badgeImg, "Paper Route");
-  tHead.append(tOn, tTitle, badge);
+  badge.title = "Added by Paper Route";
+  badge.append(badgeImg);
+  const tMode = document.createElement("span");
+  tMode.className = "pr-mode";
+  modeLine(tMode);
+  tHead.append(tOn, tTitle, tMode, badge);
   const tBody = document.createElement("div");
   tBody.className = "pr-tpsl-b";
   tBody.hidden = true;
@@ -213,10 +278,16 @@
   const tSl = sideRow("sl", { light: true });
   const tNote = document.createElement("div");
   tNote.className = "pr-note";
-  tNote.append(
-    triggerNote(),
-    " Set when this order fills (from the fill price if you use % or $). Watched by Paper Route: keep Chrome open.",
-  );
+  function ticketNote() {
+    tNote.replaceChildren(triggerNote(), " Paper Route closes once price crosses your level, through papertrade's queue. Keep Chrome open.");
+  }
+  // the exit you're aiming for goes first: Bank Paper in Paper mode, take profit otherwise
+  function orderRows(box, tp, sl, before) {
+    const [a, b] = paperMode() ? [sl.el, tp.el] : [tp.el, sl.el];
+    box.insertBefore(a, before);
+    box.insertBefore(b, before);
+  }
+  ticketNote();
   tBody.append(tTp.el, tSl.el, tNote);
   const tPending = document.createElement("div");
   tPending.className = "pr-pending";
@@ -276,7 +347,8 @@
     if (!p) return;
     tPending.textContent = "";
     const t = document.createElement("span");
-    const what = [p.tp && `TP ${p.tp.kind === "price" ? fmtPxShow(p.tp.value) : p.tp.kind === "roe" ? `+${p.tp.value}%` : `+$${p.tp.value}`}`, p.sl && `SL ${p.sl.kind === "price" ? fmtPxShow(p.sl.value) : p.sl.kind === "roe" ? `−${p.sl.value}%` : `−$${p.sl.value}`}`].filter(Boolean).join(" · ");
+    const [tpTag, slTag] = paperMode() ? ["Win exit", "Paper at"] : ["TP", "SL"];
+    const what = [p.tp && `${tpTag} ${p.tp.kind === "price" ? fmtPxShow(p.tp.value) : p.tp.kind === "roe" ? `+${p.tp.value}%` : `+$${p.tp.value}`}`, p.sl && `${slTag} ${p.sl.kind === "price" ? fmtPxShow(p.sl.value) : p.sl.kind === "roe" ? `−${p.sl.value}%` : `−$${p.sl.value}`}`].filter(Boolean).join(" · ");
     t.textContent = `✓ ${what} waiting for your ${p.isLong ? "long" : "short"} to fill`;
     const cancel = document.createElement("button");
     cancel.type = "button";
@@ -313,7 +385,8 @@
     chip.dataset.id = id;
     chip.dataset.coin = coin;
     const x = eng.snap()?.exits?.byPosition?.[id];
-    const key = x ? `${x.tpPx}|${x.slPx}|${x.state}` : "add";
+    const paper = paperMode();
+    const key = x ? `${x.tpPx}|${x.slPx}|${x.state}|${paper}` : `add|${paper}`;
     if (chip.dataset.key === key) return;
     chip.dataset.key = key;
     chip.textContent = "";
@@ -321,12 +394,16 @@
     img.src = ICON;
     chip.append(img);
     chip.classList.toggle("add", !x);
-    chip.title = x ? "Stop loss / take profit watched by Paper Route. Click to edit." : "Add a stop loss or take profit (watched by Paper Route)";
-    if (!x) return chip.append("TP/SL");
+    chip.title = paper
+      ? x ? "Exits watched by Paper Route. Click to edit." : "Set where to bank Paper, or an exit if papertrade wins (watched by Paper Route)"
+      : x ? "Stop loss / take profit watched by Paper Route. Click to edit." : "Add a stop loss or take profit (watched by Paper Route)";
+    if (!x) return chip.append(paper ? "Exits" : "TP/SL");
     if (x.state === "closing") return chip.append(`Closing (${x.reason})…`);
-    if (x.tpPx != null) chip.append(Object.assign(document.createElement("span"), { className: "tp", textContent: `TP ${fmtPxShow(x.tpPx)}` }));
-    if (x.tpPx != null && x.slPx != null) chip.append(" · ");
-    if (x.slPx != null) chip.append(Object.assign(document.createElement("span"), { className: "sl", textContent: `SL ${fmtPxShow(x.slPx)}` }));
+    // Paper mode: the loss level is the goal, so it leads and takes the positive colour
+    const slSpan = x.slPx != null && Object.assign(document.createElement("span"), { className: paper ? "tp" : "sl", textContent: `${paper ? "Paper at" : "SL"} ${fmtPxShow(x.slPx)}` });
+    const tpSpan = x.tpPx != null && Object.assign(document.createElement("span"), { className: paper ? "sl" : "tp", textContent: `${paper ? "Win exit" : "TP"} ${fmtPxShow(x.tpPx)}` });
+    const parts = (paper ? [slSpan, tpSpan] : [tpSpan, slSpan]).filter(Boolean);
+    parts.forEach((sp, i) => chip.append(...(i ? [" · ", sp] : [sp])));
   }
 
   function scanRows() {
@@ -343,17 +420,21 @@
     editing = id;
     editor.textContent = "";
     const head = hud.el("div", "pe-h");
-    const title = hud.el("b", null, "TP / SL");
+    const title = hud.el("b", null, paperMode() ? "Exits" : "TP / SL");
+    const mode = hud.el("span", "pe-mode");
+    modeLine(mode);
+    title.append(mode);
     const close = hud.el("button", "pe-x", "×");
     close.type = "button";
     close.addEventListener("click", closeEditor);
     head.append(title, close);
     editor.append(head);
     if (!p) {
-      editor.append(hud.el("p", "pe-sub", coin !== s?.settings.coin ? `Open the ${coin} page to edit this position's TP/SL.` : "Waiting for this position's details…"));
+      editor.append(hud.el("p", "pe-sub", coin !== s?.settings.coin ? `Open the ${coin} page to edit this position's exits.` : "Waiting for this position's details…"));
     } else {
       const base = { isLong: p.isLong, entry: p.entry, size: p.size, margin: p.margin, bust: p.bust };
       editor.append(hud.el("p", "pe-sub", `${p.coin} ${p.isLong ? "long" : "short"} ${p.leverage}× · entry ${fmtPxShow(p.entry)} · liquidation ${fmtPxShow(p.bust)}`));
+
       eTp.bind(() => base);
       eSl.bind(() => base);
       const x = s.exits?.byPosition?.[id];
@@ -381,10 +462,12 @@
       });
       const actions = hud.el("div", "pe-actions");
       actions.append(save, remove);
-      editor.append(eTp.el, eSl.el, err, actions);
-      const tether = s.auto ? "Tether closes the Hyperliquid hedge when papertrade's close fills." : "Tether is off, so Hyperliquid won't be touched.";
+      eTp.sync();
+      eSl.sync();
+      editor.append(...(paperMode() ? [eSl.el, eTp.el] : [eTp.el, eSl.el]), err, actions);
+      const tether = s.auto ? " Tether closes the Hyperliquid side when papertrade's close fills." : " Hyperliquid isn't touched.";
       const note = hud.el("p", "pe-note");
-      note.append(triggerNote(), ` Watched by Paper Route and closed with papertrade's Close button: keep Chrome open. ${tether}`);
+      note.append(triggerNote(), ` Paper Route closes once price crosses your level, through papertrade's queue. Keep Chrome open.${tether}`);
       editor.append(note);
     }
     editor.hidden = false;
@@ -417,9 +500,17 @@
       scanRows();
     }, 50);
   }).observe(document.body, { childList: true, subtree: true });
+  let lastPaper = null;
   eng.onSnap((s) => {
     scanRows();
     renderPending(s);
+    if (paperMode() !== lastPaper) {
+      lastPaper = paperMode();
+      orderRows(tBody, tTp, tSl, tNote);
+      modeLine(tMode);
+      ticketNote();
+      for (const r of [tTp, tSl, eTp, eSl]) r.sync();
+    }
   });
   setInterval(() => {
     tTp.sync();

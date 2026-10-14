@@ -135,6 +135,20 @@ under 1 bp) and, when a level is hit, clicks papertrade's own Close button, foll
 Tether on, the Hyperliquid hedge closes when that close fills. A level is a trigger, not a price guarantee, and it
 only works while Chrome is open with Paper Route enabled (see [Keep it running](#keep-it-running)).
 
+**With Tether on, the exits are set up for [the play](#the-play).** The papertrade leg is meant to lose, since
+losing closes and liquidations mint PAPER (a liquidation on the full margin), so the form and editor show a
+**Tether on** pill and relabel the two sides:
+
+- **Bank Paper at (SL)** (the stop-loss side, listed first): close both legs once papertrade is down 25 / 50 / 75 % of
+  margin, or **At bust** (the default) to let papertrade liquidate while the [safety net](#safety-net) closes
+  Hyperliquid at the same price.
+- **Win exit (TP)** (the take-profit side): an optional early exit, off by default. A winning close earns
+  no PAPER, and while hedged the pair stays neutral if you wait.
+
+With Tether off the pill reads **Tether off** and they work as an ordinary one-sided take profit and stop loss.
+The amount next to each side shows the dollar P&L and how far price has to move: picks are a % of your margin,
+so the dollars stay the same at any leverage while the distance shrinks as leverage rises.
+
 ### Safety net
 
 Papertrade liquidates a position by itself, browser or not. So that the hedge doesn't outlive it, Paper Route

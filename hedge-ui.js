@@ -72,7 +72,6 @@
             <button class="pbtn" data-act="toHl" data-tip="Opens papertrade's own Withdraw dialog. Papertrade's wallet signs its withdrawals, so you finish it there.">To Hyperliquid</button>
           </div>
         </div>
-        <div class="hx-acct-slot"></div>
           </div>
       </div>
       <div class="hx-unlock" hidden>
@@ -84,11 +83,11 @@
   hud.body.append(card);
 
   // ---------- Accounts & transfers: its own section under Tether ----------
-  // Balances, moving USDC and every Hyperliquid position. Folded by default; while folded, the
+  // Balances and moving USDC (positions are listed in Tether). Folded by default; while folded, the
   // header shows both balances, or the suggested transfer when there is one.
   const acctSec = el("section", "accts collapsed");
   acctSec.innerHTML = `
-    <div class="sec-h" data-act="toggle"><span class="cap" data-tip="Balances on both venues, moving USDC between them, and every position on your Hyperliquid account">${hud.chevron}Accounts &amp; transfers</span><span class="cap-r hx-accts-sum"></span></div>`;
+    <div class="sec-h" data-act="toggle"><span class="cap" data-tip="Balances on both venues, and moving USDC between them">${hud.chevron}Accounts &amp; transfers</span><span class="cap-r hx-accts-sum"></span></div>`;
   acctSec.append(card.querySelector(".hx-accts-b"));
   card.after(acctSec);
   chrome.storage.local.get("acctsOpen").then(({ acctsOpen }) => acctSec.classList.toggle("collapsed", !acctsOpen));
@@ -110,7 +109,8 @@
     <div class="hla-title"><span class="lbl" data-tip="Every open perp position on your Hyperliquid wallet, on all coins">Hyperliquid positions</span><span class="hla-addr" data-tip="Your connected Hyperliquid wallet"></span></div>
     <div class="hla-pos"></div>
     <div class="hla-spot"></div>`;
-  acctSec.querySelector(".hx-acct-slot").append(acct);
+  // every position on the Hyperliquid wallet: detail, so it closes out the Tether section
+  card.querySelector(".hx-netline").after(acct);
   const aq = (sel) => acct.querySelector(sel);
 
   const fmtSz = (v) => Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 5 });
@@ -134,36 +134,28 @@
       : `${pt ? `${usdK(pt.available)} paper · ` : ""}${Number.isFinite(h.equity) ? usdK(h.equity) : "—"} HL`;
     sum.className = `cap-r hx-accts-sum${sg?.direction ? " suggest" : ""}`;
 
+    // two-line rows (simple mode's label / value list): coin, side, size and P&L on top;
+    // entry → mark and liquidation underneath, so nothing has to be cut short
     const coin = snap.settings.coin;
-    const head = el("div", "hla-row hla-head");
-    for (const [t, tipText] of [
-      ["Position", "Coin, side and size"],
-      ["Entry → mark", "Average entry price, and the current mid"],
-      ["P&L", "Unrealized profit or loss, and return on the margin used"],
-      ["Liq.", "Hyperliquid liquidation price"],
-    ]) {
-      const c = el("span", null, t);
-      c.dataset.tip = tipText;
-      head.append(c);
-    }
     const MAX_ROWS = 8;
     const sorted = [...h.positions].sort((x, y) => (y.coin === coin) - (x.coin === coin) || Math.abs(y.value) - Math.abs(x.value));
     const rows = sorted.slice(0, MAX_ROWS).map((p) => {
       const row = el("div", `hla-row${p.coin === coin ? " here" : ""}`);
       const side = p.size > 0 ? "Long" : "Short";
       const name = el("span", "hla-coin");
-      name.append(el("b", null, p.coin), el("span", `hla-side ${p.size > 0 ? "up" : "dn"}`, ` ${side} ${fmtSz(p.size)}`));
+      name.append(el("b", null, p.coin), el("span", `hla-side ${p.size > 0 ? "up" : "dn"}`, `${side} ${fmtSz(p.size)}`), el("span", "hla-lev", `${p.leverage.value}x ${p.leverage.isCross ? "cross" : "iso"}`));
       name.dataset.tip = `${p.coin} ${side.toLowerCase()} ${fmtSz(p.size)} · ${usd(p.value, 0)} notional · ${p.leverage.value}x ${p.leverage.isCross ? "cross" : "isolated"} · ${usd(p.margin)} margin${p.coin === coin ? " · this is the coin you're viewing on papertrade" : ""}`;
-      const px = el("span", "hla-px", `${fmtPrice(p.entry)} → ${fmtPrice(p.mark)}`);
       const pnl = el("span", `hla-pnl ${p.uPnl >= 0 ? "up" : "dn"}`, `${signed(p.uPnl)} (${(p.roe * 100).toFixed(1)}%)`);
-      pnl.dataset.tip = `Unrealized ${signed(p.uPnl)}; funding since open ${signed(p.funding)}`;
-      const liq = el("span", "hla-liq", fmtPrice(p.liqPx));
-      if (p.liqPx && p.mark) liq.dataset.tip = `${((Math.abs(p.liqPx / p.mark - 1)) * 100).toFixed(2)}% from the current price`;
-      row.append(name, px, pnl, liq);
+      pnl.dataset.tip = `Unrealized ${signed(p.uPnl)}, ${(p.roe * 100).toFixed(1)}% on margin; funding since open ${signed(p.funding)}`;
+      const px = el("span", "hla-px", `Entry ${fmtPrice(p.entry)} → ${fmtPrice(p.mark)}`);
+      px.dataset.tip = "Average entry price, and the current mid";
+      const liq = el("span", "hla-liq", `Liq. ${fmtPrice(p.liqPx)}`);
+      if (p.liqPx && p.mark) liq.dataset.tip = `Hyperliquid liquidation price, ${((Math.abs(p.liqPx / p.mark - 1)) * 100).toFixed(2)}% from the current price`;
+      row.append(name, pnl, px, liq);
       return row;
     });
     if (sorted.length > MAX_ROWS) rows.push(el("div", "hla-empty", `+${sorted.length - MAX_ROWS} more positions (largest shown)`));
-    aq(".hla-pos").replaceChildren(...(rows.length ? [head, ...rows] : [el("div", "hla-empty", "No open positions on Hyperliquid.")]));
+    aq(".hla-pos").replaceChildren(...(rows.length ? rows : [el("div", "hla-empty", "No open positions on Hyperliquid.")]));
 
     const others = h.spot.filter((b) => b.coin !== "USDC");
     aq(".hla-spot").textContent = others.length

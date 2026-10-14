@@ -140,9 +140,9 @@
     const r = target.getBoundingClientRect();
     const t = tip.getBoundingClientRect();
     const left = Math.max(8, Math.min(window.innerWidth - t.width - 8, r.left + r.width / 2 - t.width / 2));
-    const below = r.bottom + 8 + t.height < window.innerHeight;
+    const above = r.top - t.height - 8 >= 8;
     tip.style.left = `${left}px`;
-    tip.style.top = `${below ? r.bottom + 8 : r.top - t.height - 8}px`;
+    tip.style.top = `${above ? r.top - t.height - 8 : r.bottom + 8}px`;
   }
   function hideTip() {
     tipFor = null;
