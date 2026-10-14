@@ -116,6 +116,7 @@ export function createHedgeEngine({ publish, exec }) {
       ptBustDist: state.pt.summary?.bust && d ? Math.abs(state.pt.summary.bust / d.mid - 1) : null,
       hlLiqDist: state.hl.account?.liqPx && d ? Math.abs(state.hl.account.liqPx / d.mid - 1) : null,
       suggestion: rebalanceSuggestion(),
+      hlEquity: state.hl.account ? hlEquityOf(state.hl.account) : null,
       maxLeverage,
       rounds: rounds.snapshot(),
       pageCoin,
@@ -163,6 +164,14 @@ export function createHedgeEngine({ publish, exec }) {
     }
   }
 
+  // Default accounts keep spot USDC apart from perp margin (it can be moved over). Unified and
+  // portfolio-margin accounts post spot USDC as collateral, so their perp accountValue can read 0
+  // while there is margin free to trade: count the spot USDC (plus open P&L) instead.
+  function hlEquityOf(acct) {
+    if (state.hl.abstraction === "default") return acct.accountValue + acct.spotUsdc;
+    return Math.max(acct.accountValue, (acct.spotUsdcTotal ?? 0) + acct.uPnl);
+  }
+
   // HL needs enough equity that its liquidation sits >= k x papertrade's bust distance away;
   // papertrade needs one round of margin available. Whatever is left over can move.
   function rebalanceSuggestion() {
@@ -172,7 +181,7 @@ export function createHedgeEngine({ publish, exec }) {
     const bustDist = pt.bust ? Math.abs(pt.bust / acct.mid - 1) : 1 / 200;
     const hlNotional = Math.max(Math.abs(acct.size), Math.abs(pt.netSize)) * acct.mid;
     const hlRequired = hlNotional * bustDist * settings.marginK;
-    const hlEquity = acct.accountValue + (state.hl.abstraction === "default" ? acct.spotUsdc : 0);
+    const hlEquity = hlEquityOf(acct);
     const hlExcess = hlEquity - hlRequired;
     const ptShort = settings.roundMarginUsd - pt.available;
     if (ptShort > 1 && hlExcess > 1) return { direction: "toPapertrade", amount: Math.floor(Math.min(ptShort, hlExcess)), hlRequired, hlExcess };

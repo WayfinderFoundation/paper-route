@@ -14,72 +14,105 @@
   const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "—");
 
   // ---------- DOM ----------
-  const card = el("section", "hedge");
+  const { tipped: tl, icons } = hud;
+  const T = {
+    tether:
+      "Tether holds the opposite of your papertrade position on Hyperliquid, so the pair is market-neutral. " +
+      "It follows papertrade's fills, not your clicks: a queued open isn't hedged until it lands, and a queued close keeps the hedge on until it fills.",
+    lev:
+      "Leverage for the Hyperliquid hedge only (papertrade leverage is set under Place a trade). Higher leverage ties up less Hyperliquid margin " +
+      "but moves its liquidation closer. Keep Hyperliquid's liquidation well beyond papertrade's bust: the liq line turns red when it isn't. " +
+      "The dot marks what's applied on Hyperliquid right now.",
+    mode: "Cross shares your whole Hyperliquid balance as margin for the hedge. Isolated ring-fences margin for this position only, so its liquidation comes sooner.",
+    hedgeNow: "Sends one Hyperliquid market order to bring the hedge to exactly minus your papertrade position. You'll confirm the size and fees first.",
+    band: "Tether trades only when the hedge is off by more than this many dollars, so it doesn't chase every small move. Change it in settings.",
+    net: "Resting reduce-only orders on Hyperliquid at papertrade's liquidation prices. If papertrade busts while this browser is closed, the hedge closes with it.",
+    details: "Open P&L on both legs (papertrade after its win fee), and how far each venue's forced close is from the current price.",
+    ptBal: "Papertrade balance you can open new positions with. Queued means deposited funds papertrade hasn't credited yet.",
+    hlBal:
+      "Free to trade is the margin Hyperliquid will let a new hedge use on this coin, which is what sizing uses. " +
+      "Equity is the account's total value including open P&L. Withdrawable is what can leave Hyperliquid right now.",
+    move:
+      "Move USDC between your Hyperliquid hedge wallet and your papertrade account. Paper Route aims to keep enough on Hyperliquid that its liquidation sits " +
+      "a set multiple further away than papertrade's bust, plus one trade's margin on papertrade, and suggests moving whatever's left over. " +
+      "Sending to papertrade needs your main key unlocked; withdrawing from papertrade is finished in papertrade's own dialog.",
+  };
+  const card = el("section", "hedge acc");
   card.innerHTML = `
-    <div class="sec-h hedge-h" data-act="toggle">
-      <span class="cap">Tether · Hyperliquid</span>
-      <span class="hx-chips"><span class="badge hx-signer">—</span></span>
+    <div class="sec-h" data-acc>
+      <span class="sec-t"><i class="chev">${icons.chevron}</i><span class="cap">${tl("Tether", T.tether)}</span></span>
+      <span class="hx-chips"><span class="cap-r hx-sum"></span><span class="badge hx-signer">—</span></span>
     </div>
-    <div class="hx-body">
+    <div class="acc-b hx-body">
       <div class="hx-lev">
-        <span class="lbl">HL leverage</span>
+        <span class="lbl">${tl("Hyperliquid leverage", T.lev)}</span>
+        <div class="seg hx-mode" data-tip="${T.mode}"><button data-act="mode" data-cross="1">Cross</button><button data-act="mode" data-cross="0">Iso</button></div>
         <div class="seg hx-levs"></div>
-        <div class="seg hx-mode"><button data-act="mode" data-cross="1">Cross</button><button data-act="mode" data-cross="0">Iso</button></div>
       </div>
+      <div class="hx-confirm hx-confirm-lev" hidden></div>
       <div class="hx-empty"></div>
       <div class="hx-main">
         <div class="hx-legs">
           <div class="hx-leg"><span class="lbl">Papertrade</span><span class="hx-pt">—</span></div>
           <div class="hx-leg"><span class="lbl">Hyperliquid</span><span class="hx-hl">—</span></div>
-        </div>
-        <div class="hx-delta">
-          <div class="bar wide"><i></i></div>
-          <div class="hx-delta-t"><span class="hx-dtext">—</span><span class="hx-pct">—</span></div>
+          <div class="hx-delta">
+            <div class="bar wide"><i></i></div>
+            <div class="hx-delta-t"><span class="hx-dtext">—</span><span class="hx-pct">—</span></div>
+          </div>
         </div>
         <div class="hx-plan"></div>
         <div class="hx-actions">
-          <button class="pbtn primary" data-act="hedge">Hedge to 100%</button>
-          <label class="switch" title="Keeps Hyperliquid at minus your papertrade position. Papertrade queues orders, so the hedge moves when a papertrade open or close actually fills, not when you click."><input type="checkbox" class="hx-auto" /><span></span><em>Tether</em></label>
+          <label class="switch" data-tip="${T.tether}"><input type="checkbox" class="hx-auto" /><span></span><em>Tether</em></label>
+          <span class="hx-band" data-tip="${T.band}"></span>
+          <button class="pbtn hx-hedge" data-act="hedge" data-tip="${T.hedgeNow}">Hedge to 100%</button>
         </div>
-        <div class="hx-why">Tether keeps Hyperliquid at −(papertrade position). It reacts to papertrade fills, not clicks, so queued orders never leave you one-sided.</div>
-        <div class="hx-grid">
-          <span class="lbl">Paper P&amp;L</span><span class="hx-ptpnl">—</span>
-          <span class="lbl">HL P&amp;L</span><span class="hx-hlpnl">—</span>
-          <span class="lbl">Net</span><span class="hx-net-pnl">—</span>
-          <span class="lbl">Paper bust</span><span class="hx-bust">—</span>
-          <span class="lbl">HL liq</span><span class="hx-liq">—</span>
-        </div>
-        <div class="hx-netline" title="Resting reduce-only orders on Hyperliquid at papertrade's liquidation prices: if papertrade busts while this browser is closed, the hedge closes with it."></div>
+        <div class="hx-confirm hx-confirm-hedge" hidden></div>
+        <div class="hx-netline" data-tip="${T.net}"></div>
+        <details class="disc">
+          <summary><i class="chev">${icons.chevron}</i>${tl("P&amp;L and liquidation", T.details)}<span class="disc-v hx-net-sum"></span></summary>
+          <div class="hx-grid">
+            <span class="lbl">Papertrade P&amp;L</span><span class="hx-ptpnl">—</span>
+            <span class="lbl">Hyperliquid P&amp;L</span><span class="hx-hlpnl">—</span>
+            <span class="lbl">Net</span><span class="hx-net-pnl">—</span>
+            <span class="lbl">Papertrade bust</span><span class="hx-bust">—</span>
+            <span class="lbl">Hyperliquid liq.</span><span class="hx-liq">—</span>
+          </div>
+        </details>
+        <div class="sub-h"><span class="cap">Wallets</span></div>
         <div class="hx-bal">
-          <div><span class="lbl">Paper avail.</span><b class="hx-ptav">—</b><small class="hx-ptq"></small></div>
-          <div><span class="lbl">HL equity</span><b class="hx-hleq">—</b><small class="hx-hlw"></small></div>
+          <div><span class="lbl">${tl("Papertrade", T.ptBal)}</span><b class="hx-ptav">—</b><small class="hx-ptq">available</small></div>
+          <div><span class="lbl">${tl("Hyperliquid", T.hlBal)}</span><b class="hx-hlfree">—</b><small class="hx-hlw"></small></div>
         </div>
+        <div class="sub-h"><span class="cap">${tl("Move funds", T.move)}</span></div>
         <div class="hx-rebal">
           <span class="hx-sugg">—</span>
           <div class="hx-rebal-row">
             <input class="field hx-amt" type="number" min="1" step="1" placeholder="USDC" />
-            <button class="pbtn" data-act="toPt">→ Papertrade</button>
-            <button class="pbtn" data-act="toHl">→ Hyperliquid</button>
+            <button class="pbtn" data-act="toPt" data-tip="Send USDC from your Hyperliquid hedge wallet to your papertrade deposit address. Needs your main key unlocked.">To papertrade</button>
+            <button class="pbtn" data-act="toHl" data-tip="Opens papertrade's Withdraw dialog. Finish the withdrawal there, then send it on to your hedge wallet.">To Hyperliquid</button>
           </div>
         </div>
-      </div>
-      <div class="hx-confirm" hidden>
-        <span class="hx-confirm-t"></span>
-        <div><button class="pbtn primary" data-act="confirm">Confirm</button><button class="pbtn" data-act="cancel">Cancel</button></div>
-      </div>
-      <div class="hx-unlock" hidden>
-        <input class="field hx-pass" type="password" placeholder="Main key passphrase (for transfers)" autocomplete="off" />
-        <button class="pbtn" data-act="unlock">Unlock</button>
+        <div class="hx-confirm hx-confirm-move" hidden></div>
+        <div class="hx-unlock" hidden>
+          <input class="field hx-pass" type="password" placeholder="Main key passphrase" autocomplete="off" />
+          <button class="pbtn" data-act="unlock">Unlock</button>
+        </div>
       </div>
       <div class="hx-alerts"></div>
     </div>`;
-  hud.body.append(card);
+  hud.body.insertBefore(card, hud.flow);
+  hud.accordion(card, "tether", true);
 
   // ---------- schedule section ----------
   const LEVELS = [0.1, 0.2, 0.35, 1];
-  const sched = el("section", "sched");
+  const sched = el("section", "sched acc");
   sched.innerHTML = `
-    <div class="sec-h"><span class="cap">Round</span><span class="cap-r sc-clock"></span></div>
+    <div class="sec-h" data-acc>
+      <span class="sec-t"><i class="chev">${icons.chevron}</i><span class="cap">${tl("Place a trade", "This is where you open a position from Paper Route. It fills in papertrade's own order ticket and clicks Place Trade for you, " +
+        "optionally with a matching Hyperliquid hedge and a stop and take profit that Paper Route watches. Open it now or at a set time.")}</span></span>
+      <span class="cap-r sc-clock"></span>
+    </div>
+    <div class="acc-b">
     <div class="sg-trade" hidden>
       <div class="sg-trade-top"><b class="sg-trade-t"></b><span class="badge sg-trade-state"></span></div>
       <div class="sg-trade-d"></div>
@@ -87,46 +120,48 @@
       <button class="pbtn exit" data-act="exit">Close both legs</button>
     </div>
     <div class="sc-form">
+      <div class="seg sc-side big"><button data-act="side" data-v="long" class="on">Long</button><button data-act="side" data-v="short">Short</button></div>
       <div class="sc-row">
-        <span class="lbl">Paper side</span>
-        <div class="seg sc-side"><button data-act="side" data-v="long" class="on">Long</button><button data-act="side" data-v="short">Short</button></div>
+        <label class="sc-num"><span class="lbl">${tl("Margin ($)", "Papertrade margin for this trade. Size on papertrade = margin × papertrade leverage.")}</span><input class="field sc-margin" type="number" min="1" step="1" /></label>
+        <label class="sc-num"><span class="lbl">${tl("Papertrade leverage", "Papertrade busts at about 1 ÷ leverage from entry: 100x busts about 1% away. The Hyperliquid hedge uses its own leverage, set under Tether.")}</span><input class="field sc-lev" type="number" min="1" step="1" /></label>
       </div>
-      <div class="sc-row">
-        <label class="sc-num"><span class="lbl">Margin $</span><input class="field sc-margin" type="number" min="1" step="1" /></label>
-        <label class="sc-num"><span class="lbl">Paper lev.</span><input class="field sc-lev" type="number" min="1" step="1" /></label>
-      </div>
-      <div class="sc-cap">
+      <div class="sc-size">
+        <span class="sc-notional">—</span>
         <span class="sc-cap-t">Waiting for balances…</span>
-        <button class="pbtn sm" data-act="max">Max</button>
+        <button class="pbtn sm" data-act="max" data-tip="Fill in the largest margin both venues can carry right now.">Max</button>
       </div>
-      <div class="sc-row"><span class="lbl">Stop</span><div class="seg sc-stop"></div><input class="field sc-pct sc-stop-c" type="number" min="0.01" max="50" step="0.01" placeholder="%" title="Custom stop, % from papertrade's fill" /></div>
-      <div class="sc-row"><span class="lbl">Take profit</span><div class="seg sc-limit"></div><input class="field sc-pct sc-limit-c" type="number" min="0.01" max="50" step="0.01" placeholder="%" title="Custom take profit, % from papertrade's fill" /></div>
-      <div class="sc-watch">Stop and take profit are watched by this browser, not placed on papertrade or Hyperliquid. Keep Chrome open and Paper Route enabled until the round closes.</div>
+      <div class="sc-fast">${tl("Larger trades usually fill faster on papertrade and can skip its waiting queue.", "Papertrade queues opens and closes, sometimes for minutes. Higher-notional orders tend to be filled sooner, so a bigger size usually means less waiting. Your max is set by both venues' balances and limits.")}</div>
+      <div class="sc-row"><span class="lbl">${tl("Stop", "Closes both legs if price moves this far against your papertrade position, measured from papertrade's fill price. Off leaves papertrade's bust as the only stop.")}</span><div class="seg sc-stop"></div><input class="field sc-pct sc-stop-c" type="number" min="0.01" max="50" step="0.01" placeholder="%" aria-label="Custom stop %" /></div>
+      <div class="sc-row"><span class="lbl">${tl("Take profit", "Closes both legs when price moves this far in your favour, from papertrade's fill price. Off means you close it yourself.")}</span><div class="seg sc-limit"></div><input class="field sc-pct sc-limit-c" type="number" min="0.01" max="50" step="0.01" placeholder="%" aria-label="Custom take profit %" /></div>
+      <div class="sc-watch">Stop and take profit are watched by this browser, not placed on either exchange. Keep Chrome open until the trade closes.</div>
       <div class="sc-row">
-        <label class="switch"><input type="checkbox" class="sc-hedge" checked /><span></span><em>Hedge on Hyperliquid (opens and closes on papertrade's fills)</em></label>
-      </div>
-      <div class="sc-row sc-when">
-        <button class="pbtn primary sc-now" data-act="open-now">Open now</button>
-        <span class="lbl">or at</span>
-        <input class="field sc-time" type="time" step="1" />
-        <div class="seg sc-quick"><button data-act="plus" data-s="15">+15s</button><button data-act="plus" data-s="60">+1m</button><button data-act="plus" data-s="300">+5m</button></div>
-        <button class="pbtn sc-go" data-act="schedule">Schedule</button>
+        <label class="switch"><input type="checkbox" class="sc-hedge" checked /><span></span><em>${tl("Hedge on Hyperliquid", "Opens the opposite position on Hyperliquid when papertrade's open fills, and closes it when papertrade's close fills, so you're never one-sided while papertrade's queue catches up.")}</em></label>
       </div>
       <div class="sc-note"></div>
+      <button class="pbtn primary sc-now" data-act="open-now">Place trade now</button>
+      <div class="hx-confirm sc-confirm sc-confirm-now" hidden></div>
+      <details class="disc sc-later">
+        <summary><i class="chev">${icons.chevron}</i>Schedule for later</summary>
+        <div class="sc-row sc-when">
+          <input class="field sc-time" type="time" step="1" aria-label="Open at" />
+          <div class="seg sc-quick"><button data-act="plus" data-s="15">+15s</button><button data-act="plus" data-s="60">+1m</button><button data-act="plus" data-s="300">+5m</button></div>
+          <button class="pbtn sc-go" data-act="schedule">Schedule</button>
+        </div>
+        <div class="hx-confirm sc-confirm sc-confirm-later" hidden></div>
+      </details>
+      <div class="hx-alerts sc-alerts"></div>
     </div>
-    <div class="hx-confirm sc-confirm" hidden>
-      <span class="sc-confirm-t"></span>
-      <div><button class="pbtn primary" data-act="sc-confirm">Confirm</button><button class="pbtn" data-act="sc-cancel">Cancel</button></div>
-    </div>
-    <div class="sc-list"></div>`;
-  hud.body.append(sched);
+    <div class="sc-list"></div>
+    </div>`;
+  hud.body.insertBefore(sched, hud.flow);
+  hud.accordion(sched, "trade", true);
   const sq = (s) => sched.querySelector(s);
   for (const [cls, def] of [[".sc-stop", 0.2], [".sc-limit", 0.2]]) {
     sq(cls).replaceChildren(...["off", ...LEVELS].map((l) => {
       const b = el("button", l === def ? "on" : null, l === "off" ? "Off" : `${l}%`);
       b.dataset.act = cls === ".sc-stop" ? "stop" : "limit";
       b.dataset.v = String(l);
-      if (l === "off") b.title = cls === ".sc-stop" ? "No stop: papertrade's bust is the only stop" : "No take profit: close it yourself";
+      if (l === "off") b.dataset.tip = cls === ".sc-stop" ? "No stop: papertrade's bust is the only stop" : "No take profit: close it yourself";
       return b;
     }));
   }
@@ -142,6 +177,7 @@
   }
   const levelText = (v) => (v === null ? "off" : `${v}%`);
   let schedConfirm = null;
+  let schedArea = null; // the confirm row under whichever button was clicked
   // Size is saved in the extension (chrome.storage.local "tradeSize"); first run prefills from
   // papertrade's own ticket.
   sq(".sc-margin").value = document.getElementById("im")?.value || "100";
@@ -202,6 +238,7 @@
       }
       else if (act === "schedule" || act === "open-now") {
         const now = act === "open-now";
+        schedArea = sq(now ? ".sc-confirm-now" : ".sc-confirm-later");
         const spec = {
           at: now ? Date.now() : timeToEpoch(sq(".sc-time").value),
           immediate: now,
@@ -216,35 +253,35 @@
         const c = formCapacity();
         if (!c) throw new Error("Waiting for papertrade and Hyperliquid balances");
         if (!c.ok) throw new Error(c.problems[0]);
-        if (spec.marginUsd > c.maxMargin) throw new Error(`Max margin is $${c.maxMargin} — limited by ${c.binding}`);
+        if (spec.marginUsd > c.maxMargin) throw new Error(`Max margin is $${c.maxMargin}, limited by ${c.binding}`);
         if (spec.marginUsd < c.minMargin) throw new Error(`Min margin is $${c.minMargin} at ${spec.ptLeverage}x`);
         const notional = spec.marginUsd * spec.ptLeverage;
         schedConfirm = spec;
-        sq(".sc-confirm-t").textContent =
+        showConfirm(schedArea,
           `${now ? "Now" : `At ${sq(".sc-time").value}`}: papertrade ${snap.settings.coin} ${spec.side} $${spec.marginUsd} × ${spec.ptLeverage}x ($${Math.round(notional).toLocaleString()}), ` +
           `stop ${levelText(spec.stopPct)} / take profit ${levelText(spec.limitPct)}${spec.hedge ? ` · HL hedge at ${snap?.settings.hlLeverage ?? "?"}x, opened/closed on papertrade's fills` : ""}. ` +
           (spec.stopPct === null && spec.limitPct === null
             ? "No exits set: Paper Route closes nothing until you click Close both legs."
-            : "Exits are watched by this browser: keep Chrome open and Paper Route enabled until it closes (if the papertrade tab is closed, Paper Route reopens it to close).");
-        sq(".sc-confirm").hidden = false;
+            : "Exits are watched by this browser: keep Chrome open and Paper Route enabled until it closes (if the papertrade tab is closed, Paper Route reopens it to close)."),
+          "sc-confirm", "sc-cancel");
       } else if (act === "sc-confirm") {
         const spec = schedConfirm;
         schedConfirm = null;
-        sq(".sc-confirm").hidden = true;
+        hideConfirms();
         // "now" is re-stamped at confirm time, not when the confirm row was shown
         await send("scheduleRound", spec.immediate ? { ...spec, at: Date.now() } : spec);
-        flash("ok", spec.immediate ? "Opening…" : "Round scheduled");
+        flash("ok", spec.immediate ? "Opening…" : "Trade scheduled", schedArea);
       } else if (act === "sc-cancel") {
         schedConfirm = null;
-        sq(".sc-confirm").hidden = true;
+        hideConfirms();
       } else if (act === "round-cancel") {
         await send("cancelRound", { id: btn.dataset.id });
       } else if (act === "exit") {
         await send("exitRound");
-        flash("warn", "Closing both legs…");
+        flash("warn", "Closing both legs…", sq('[data-act="exit"]'));
       }
     } catch (err) {
-      flash("error", String(err.message || err));
+      flash("error", String(err.message || err), act === "exit" ? sq('[data-act="exit"]') : act === "max" ? sq(".sc-size") : schedArea ?? sq(".sc-confirm-now"));
     }
   });
 
@@ -303,13 +340,15 @@
       : form.stopPct === null
         ? `No stop: papertrade busts ${bustPct.toFixed(3)}% away at ${lev}x`
         : form.stopPct >= bustPct
-          ? `At ${lev}x papertrade busts ${bustPct.toFixed(3)}% away — a ${form.stopPct}% stop won't be reached first`
+          ? `At ${lev}x papertrade busts ${bustPct.toFixed(3)}% away, so a ${form.stopPct}% stop won't be reached first`
           : "";
     sq(".sc-watch").hidden = form.stopPct === null && form.limitPct === null;
 
     const c = formCapacity();
     const margin = Number(sq(".sc-margin").value);
+    sq(".sc-notional").textContent = margin > 0 && lev ? `$${Math.round(margin * lev).toLocaleString()} notional` : "";
     const capT = sq(".sc-cap-t");
+    delete capT.dataset.tip;
     let fits = false;
     if (!c) {
       capT.textContent = snap?.capacityInputs === null ? "Set wallets to see the max size" : "Waiting for balances…";
@@ -319,7 +358,8 @@
       capT.className = "sc-cap-t dn";
     } else {
       fits = margin >= c.minMargin && margin <= c.maxMargin;
-      capT.textContent = `Max $${c.maxMargin.toLocaleString()} ($${Math.floor(c.maxNotional).toLocaleString()} notional) · min $${c.minMargin} — ${c.binding}`;
+      capT.textContent = `Margin $${c.minMargin} to $${c.maxMargin.toLocaleString()}`;
+      capT.dataset.tip = `The most both venues can carry right now is $${Math.floor(c.maxNotional).toLocaleString()} notional, limited by ${c.binding}. The minimum is papertrade's smallest order.`;
       capT.className = `sc-cap-t ${fits ? "" : "dn"}`;
     }
     sq('[data-act="max"]').disabled = !c?.ok;
@@ -356,12 +396,12 @@
     box.hidden = !r;
     if (!r) return;
     const side = r.isLong ? "LONG" : "SHORT";
-    sq(".sg-trade-t").textContent = `${r.coin} round ${r.label}`;
+    sq(".sg-trade-t").textContent = `${r.coin} trade ${r.label}`;
     sq(".sg-trade-state").textContent = r.state;
     sq(".sg-trade-state").className = `badge sg-trade-state ${r.state === "live" ? "up" : "warn"}`;
     const since = Math.round((Date.now() - (r.openedAt ?? r.stateAt)) / 1000);
     const queued = r.ptQueue
-      ? `Papertrade ${r.ptQueue.kind} queued ${Math.round((Date.now() - r.ptQueue.since) / 1000)}s — HL ${r.ptQueue.kind === "open" ? "opens when it fills" : "stays hedged until it fills"}`
+      ? `Papertrade ${r.ptQueue.kind} queued ${Math.round((Date.now() - r.ptQueue.since) / 1000)}s: Hyperliquid ${r.ptQueue.kind === "open" ? "opens when it fills" : "stays hedged until it fills"}`
       : null;
     sq(".sg-trade-d").textContent = [
       r.entry ? `Paper ${side} $${r.marginUsd} × ${r.ptLeverage}x @ ${fmtPx(r.entry)} · stop ${r.stopPx == null ? "off" : fmtPx(r.stopPx)} · take profit ${r.limitPx == null ? "off" : fmtPx(r.limitPx)} · ${Math.floor(since / 60)}m${String(since % 60).padStart(2, "0")}s` : null,
@@ -381,7 +421,7 @@
 
   const q = (s) => card.querySelector(s);
   const ui = Object.fromEntries(
-    ["hx-signer", "hx-empty", "hx-main", "hx-pt", "hx-hl", "hx-dtext", "hx-pct", "hx-auto", "hx-ptpnl", "hx-hlpnl", "hx-net-pnl", "hx-bust", "hx-liq", "hx-ptav", "hx-ptq", "hx-hleq", "hx-hlw", "hx-sugg", "hx-amt", "hx-confirm", "hx-confirm-t", "hx-unlock", "hx-pass", "hx-alerts", "hx-levs", "hx-mode", "hx-plan", "hx-netline"].map((c) => [c, q(`.${c}`)]),
+    ["hx-signer", "hx-sum", "hx-empty", "hx-main", "hx-pt", "hx-hl", "hx-dtext", "hx-pct", "hx-auto", "hx-band", "hx-ptpnl", "hx-hlpnl", "hx-net-pnl", "hx-net-sum", "hx-bust", "hx-liq", "hx-ptav", "hx-ptq", "hx-hlfree", "hx-hlw", "hx-sugg", "hx-amt", "hx-confirm-lev", "hx-confirm-hedge", "hx-confirm-move", "hx-unlock", "hx-pass", "hx-alerts", "hx-levs", "hx-mode", "hx-plan", "hx-netline"].map((c) => [c, q(`.${c}`)]),
   );
   const deltaFill = q(".hx-delta .bar i");
   const hedgeBtn = q('[data-act="hedge"]');
@@ -547,10 +587,29 @@
     return { clicked: true, clickMs: Date.now(), hidden: document.hidden };
   }
 
-  function flash(level, text) {
+  // Results show next to the control that caused them (`near`); engine alerts go to the card's foot.
+  function flash(level, text, near = ui["hx-alerts"]) {
     const a = el("div", `hx-alert ${level}`, text);
-    ui["hx-alerts"].prepend(a);
+    if (near === ui["hx-alerts"]) near.prepend(a);
+    else near.after(a);
     setTimeout(() => a.remove(), 8000);
+  }
+
+  // One confirm at a time, rendered in the row directly under the action that asked for it.
+  function showConfirm(box, text, okAct, cancelAct) {
+    hideConfirms();
+    const ok = el("button", "pbtn primary", "Confirm");
+    ok.dataset.act = okAct;
+    const no = el("button", "pbtn", "Cancel");
+    no.dataset.act = cancelAct;
+    const row = el("div");
+    row.append(ok, no);
+    box.replaceChildren(el("span", null, text), row);
+    box.hidden = false;
+    box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+  function hideConfirms() {
+    for (const b of hud.body.querySelectorAll(".hx-confirm")) b.hidden = true;
   }
 
   // ---------- render ----------
@@ -567,7 +626,7 @@
     const r = (snap.rounds ?? []).find((x) => !["done", "failed", "cancelled"].includes(x.state));
     banner.textContent = r
       ? r.state === "scheduled"
-        ? `A round is scheduled for ${r.label}. Keep Chrome open and Paper Route enabled until it has run and closed.`
+        ? `A trade is scheduled for ${r.label}. Keep Chrome open and Paper Route enabled until it has run and closed.`
         : "Paper Route is managing your exits. Keep Chrome open and Paper Route enabled until both legs close."
       : "Tether is holding a hedged position. Keep Chrome open and Paper Route enabled while it's open.";
   }
@@ -599,7 +658,7 @@
     if (!snap) {
       ui["hx-main"].hidden = true;
       ui["hx-empty"].hidden = false;
-      ui["hx-empty"].textContent = port ? "Waiting for hedge engine…" : "Hedge engine not loaded — rebuild the extension (npm run build).";
+      ui["hx-empty"].textContent = port ? "Waiting for hedge engine…" : "Hedge engine not loaded. Rebuild the extension (npm run build).";
       ui["hx-signer"].textContent = "—";
       return;
     }
@@ -617,7 +676,7 @@
     if (s.lockedBy) {
       ui["hx-main"].hidden = true;
       ui["hx-empty"].hidden = false;
-      ui["hx-empty"].textContent = `Still managing ${s.settings.coin} (${s.lockedBy === "round" ? "a round is running" : "tether is holding an open position"}) — open the ${s.settings.coin} page to see it. ${s.pageCoin} takes over once it's flat.`;
+      ui["hx-empty"].textContent = `Still managing ${s.settings.coin} (${s.lockedBy === "round" ? "a trade is running" : "tether is holding an open position"}). Open the ${s.settings.coin} page to see it. ${s.pageCoin} takes over once it's flat.`;
       return;
     }
     if (!s.settings.ptWallet || !s.settings.hedgeWallet) {
@@ -642,9 +701,10 @@
     const d = s.delta;
     const gross = Math.abs(pt.netSize) * h.mid;
     const hedged = gross === 0 ? (h.size === 0 ? 100 : 0) : Math.max(0, 100 - (Math.abs(d.deltaUsd) / gross) * 100);
-    ui["hx-dtext"].textContent = `Δ ${signed(d.deltaUsd, 0)} ${Math.abs(d.deltaUsd) <= s.settings.bandUsd ? "· in band" : ""}`;
+    ui["hx-dtext"].textContent = `Exposure ${signed(d.deltaUsd, 0)}${Math.abs(d.deltaUsd) <= s.settings.bandUsd ? " · in band" : ""}`;
     ui["hx-pct"].textContent = `${hedged.toFixed(1)}% hedged`;
     ui["hx-pct"].className = `hx-pct ${hedged >= 99 ? "up" : hedged >= 90 ? "" : "dn"}`;
+    ui["hx-sum"].textContent = gross === 0 && h.size === 0 ? "Flat" : `${hedged.toFixed(0)}% hedged`;
     const scale = Math.max(s.settings.bandUsd * 4, 1);
     deltaFill.className = d.deltaUsd >= 0 ? "up" : "dn";
     deltaFill.style.transform = `scaleX(${Math.min(1, Math.abs(d.deltaUsd) / scale)})`;
@@ -653,7 +713,7 @@
     hedgeBtn.textContent = s.busy ?? "Hedge to 100%";
     ui["hx-auto"].checked = s.auto;
     ui["hx-auto"].disabled = !canTrade;
-    ui["hx-auto"].parentElement.querySelector("em").textContent = `Tether · ±$${s.settings.bandUsd}`;
+    ui["hx-band"].textContent = `±$${s.settings.bandUsd} band`;
 
     renderPlan();
 
@@ -661,6 +721,7 @@
     setNum(ui["hx-ptpnl"], pt.uPnlAfterFee, s.winFeeRate ? ` after ${(s.winFeeRate * 100).toFixed(0)}% win fee` : "");
     setNum(ui["hx-hlpnl"], h.uPnl + h.funding, h.funding ? ` incl. ${signed(h.funding)} funding` : "");
     setNum(ui["hx-net-pnl"], net, "");
+    setNum(ui["hx-net-sum"], net, " net");
     ui["hx-bust"].textContent = pt.bust ? `${fmtPx(pt.bust)} · ${(s.ptBustDist * 100).toFixed(2)}%` : "—";
     const buffer = s.hlLiqDist && s.ptBustDist ? s.hlLiqDist / s.ptBustDist : null;
     ui["hx-liq"].textContent = h.liqPx ? `${fmtPx(h.liqPx)} · ${(s.hlLiqDist * 100).toFixed(2)}%${buffer ? ` · ${buffer.toFixed(1)}× bust` : ""}` : "—";
@@ -668,21 +729,22 @@
     renderSafetyNet();
 
     ui["hx-ptav"].textContent = usd(pt.available);
-    ui["hx-ptq"].textContent = pt.queued > 0 ? `${usd(pt.queued)} queued` : "";
-    ui["hx-hleq"].textContent = usd(h.accountValue + (s.hl.abstraction === "default" ? h.spotUsdc : 0));
-    // margin HL will still let us use for a new hedge (per side; the hedge side is what matters)
+    ui["hx-ptq"].textContent = pt.queued > 0 ? `available · ${usd(pt.queued)} queued` : "available";
+    // margin HL will still let us use for a new hedge (per side; the hedge side is what matters).
+    // That's the number sizing uses, so it leads; equity alone can read $0 on unified accounts.
     const hedgeIdx = pt.netSize > 0 ? 1 : pt.netSize < 0 ? 0 : null;
     const free = hedgeIdx === null ? Math.min(...h.availableToTrade) : h.availableToTrade[hedgeIdx];
-    ui["hx-hlw"].textContent = `${usd(free)} free to trade · ${usd(h.withdrawable)} withdrawable`;
+    ui["hx-hlfree"].textContent = usd(free);
+    ui["hx-hlw"].textContent = `free to trade · ${usd(s.hlEquity ?? h.accountValue, 0)} equity · ${usd(h.withdrawable, 0)} withdrawable`;
 
     const sg = s.suggestion;
     ui["hx-sugg"].textContent = !sg
       ? "—"
       : sg.direction === "toPapertrade"
-        ? `Suggest moving $${sg.amount} → papertrade (HL keeps ${usd(sg.hlRequired, 0)} for a ${s.settings.marginK}× buffer)`
+        ? `Suggested: move $${sg.amount} to papertrade. Hyperliquid keeps ${usd(sg.hlRequired, 0)} for a ${s.settings.marginK}× liquidation buffer.`
         : sg.direction === "toHyperliquid"
-          ? `HL is $${Math.ceil(-sg.hlExcess)} short of a ${s.settings.marginK}× buffer — move $${sg.amount} → Hyperliquid`
-          : "Balances are on target";
+          ? `Suggested: move $${sg.amount} to Hyperliquid. It's $${Math.ceil(-sg.hlExcess)} short of a ${s.settings.marginK}× liquidation buffer.`
+          : "No transfer needed: both wallets hold what they need. You can still move funds either way.";
     if (sg?.direction && !ui["hx-amt"].value) ui["hx-amt"].placeholder = String(sg.amount);
     for (const b of card.querySelectorAll('[data-act="toPt"], [data-act="toHl"]')) b.disabled = !!s.busy;
 
@@ -797,10 +859,11 @@
   }, true);
 
   // ---------- actions ----------
-  function confirm(text, run) {
+  let confirmArea = null;
+  function confirm(box, text, run) {
     pendingConfirm = run;
-    ui["hx-confirm-t"].textContent = text;
-    ui["hx-confirm"].hidden = false;
+    confirmArea = box;
+    showConfirm(box, text, "confirm", "cancel");
   }
 
   function hedgePreview() {
@@ -815,40 +878,41 @@
     const act = e.target.closest("[data-act]")?.dataset.act;
     if (!act) return;
     try {
-      if (act === "toggle") card.classList.toggle("collapsed");
-      else if (act === "hedge") confirm(hedgePreview(), () => send("hedgeNow"));
+      if (act === "hedge") confirm(ui["hx-confirm-hedge"], hedgePreview(), () => send("hedgeNow"));
       else if (act === "lev" || act === "mode") {
         const btn = e.target.closest("[data-act]");
         const leverage = act === "lev" ? Number(btn.dataset.lev) : snap.settings.hlLeverage;
         const cross = act === "mode" ? btn.dataset.cross === "1" : snap.settings.hlCross;
         const live = (snap.vault.unlocked || snap.vault.agent) && snap.hl.account;
         confirm(
+          ui["hx-confirm-lev"],
           live
             ? `Set ${snap.settings.coin} leverage on Hyperliquid to ${leverage}x ${cross ? "cross" : "isolated"}`
-            : `Save ${leverage}x ${cross ? "cross" : "isolated"} — applied on Hyperliquid before the first hedge order`,
+            : `Save ${leverage}x ${cross ? "cross" : "isolated"}. It's applied on Hyperliquid before the first hedge order.`,
           () => send("setLeverage", { leverage, cross }),
         );
       }
       else if (act === "toPt") {
         const amount = Number(ui["hx-amt"].value || ui["hx-amt"].placeholder);
         if (!(amount > 0)) throw new Error("Enter an amount");
-        confirm(`Send $${amount} USDC from ${short(snap.settings.hedgeWallet)} to papertrade ${short(snap.settings.ptWallet)}`, () => send("sendToPapertrade", { amount }));
+        confirm(ui["hx-confirm-move"], `Send $${amount} USDC from ${short(snap.settings.hedgeWallet)} to papertrade ${short(snap.settings.ptWallet)}`, () => send("sendToPapertrade", { amount }));
       } else if (act === "toHl") openPapertradeWithdraw();
       else if (act === "confirm") {
         const run = pendingConfirm;
         pendingConfirm = null;
-        ui["hx-confirm"].hidden = true;
+        hideConfirms();
         await run();
-        flash("ok", "Done");
+        flash("ok", "Done", confirmArea);
       } else if (act === "cancel") {
         pendingConfirm = null;
-        ui["hx-confirm"].hidden = true;
+        hideConfirms();
       } else if (act === "unlock") {
         await send("unlock", { passphrase: ui["hx-pass"].value, hours: 8 });
         ui["hx-pass"].value = "";
       }
     } catch (err) {
-      flash("error", String(err.message || err));
+      const near = { lev: ui["hx-confirm-lev"], mode: ui["hx-confirm-lev"], hedge: ui["hx-confirm-hedge"], unlock: ui["hx-unlock"], toPt: ui["hx-confirm-move"], toHl: ui["hx-confirm-move"] }[act];
+      flash("error", String(err.message || err), near ?? confirmArea ?? ui["hx-alerts"]);
     }
   });
 
@@ -857,7 +921,7 @@
       await send("setAuto", { on: e.target.checked });
     } catch (err) {
       e.target.checked = false;
-      flash("error", String(err.message || err));
+      flash("error", String(err.message || err), ui["hx-confirm-hedge"]);
     }
   });
 
@@ -868,7 +932,7 @@
     if (!btn) throw new Error("Couldn't find papertrade's Withdraw button");
     btn.click();
     const amount = ui["hx-amt"].value || ui["hx-amt"].placeholder;
-    flash("warn", `Withdraw $${amount} in papertrade, then send it from ${short(snap.settings.ptWallet)} to the hedge wallet ${short(snap.settings.hedgeWallet)}`);
+    flash("warn", `Withdraw $${amount} in papertrade, then send it from ${short(snap.settings.ptWallet)} to the hedge wallet ${short(snap.settings.hedgeWallet)}`, ui["hx-confirm-move"]);
   }
 
   render();

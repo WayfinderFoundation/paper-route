@@ -67,6 +67,7 @@ export function createHl() {
       marginUsed: Number(perp.marginSummary.totalMarginUsed),
       withdrawable: Number(perp.withdrawable),
       spotUsdc: usdc ? Number(usdc.total) - Number(usdc.hold) : 0,
+      spotUsdcTotal: usdc ? Number(usdc.total) : 0,
     };
   }
 

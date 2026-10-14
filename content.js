@@ -14,6 +14,8 @@
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12l3.5-4 3 2.5L14 4"/><path d="M10.5 4H14v3.5"/></svg>';
   const ICON_COLLAPSE =
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 8h8"/></svg>';
+  const ICON_CHEVRON =
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4"/></svg>';
 
   // Canvas palette: same tokens as hud.css. Canvas accepts oklch().
   const tone = {
@@ -35,6 +37,10 @@
 
   // Components shown under the gauge, grouped the way a trader reads them. `keys` are feature
   // names from src/flowindex.js; the row shows the first one the index uses (or the first key).
+  const FLOW_TIP =
+    "What it's for: a live read of Hyperliquid's order book and trades, combined into one score for which way the next 10–60 seconds lean. " +
+    "It's a short-term lean, not a trading signal: even the strongest readings expect about 1 bp, less than a round trip in fees. " +
+    "Use it to time an entry, or leave it closed. Nothing here places orders.";
   const COMPONENTS = [
     { label: "Microprice", keys: ["micro_bps"], unit: "bp", hint: "Size-weighted top of book vs mid" },
     { label: "Book imbalance", keys: ["imb5", "imb10", "imb1"], unit: "", hint: "(bids − asks) / (bids + asks), top levels" },
@@ -71,6 +77,12 @@
   };
 
   // ---------- DOM ----------
+  // A label with a dotted underline whose explanation shows in the shared tooltip on hover or focus.
+  const escAttr = (t) => t.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  function tipped(label, text) {
+    return `<span class="has-tip" tabindex="0" data-tip="${escAttr(text)}">${label}</span>`;
+  }
+
   const host = document.createElement("div");
   host.id = "paper-route-overlay";
   const root = host.attachShadow({ mode: "closed" });
@@ -87,33 +99,41 @@
     <div class="head">
       <div class="head-l">
         <span class="logo-tile"><svg class="logo" viewBox="0 0 31.7 32"><path fill="#8B2020" d="${MARK_PATH}"/></svg></span>
-        <span class="cap">Paper Route</span>
+        <span class="cap">Paper Route HUD</span>
       </div>
       <svg class="grip" viewBox="0 0 16 6"><circle cx="2" cy="1.5" r="1"/><circle cx="8" cy="1.5" r="1"/><circle cx="14" cy="1.5" r="1"/><circle cx="2" cy="4.5" r="1"/><circle cx="8" cy="4.5" r="1"/><circle cx="14" cy="4.5" r="1"/></svg>
       <div class="head-r">
         <span class="chip"><span class="dot"></span><span class="livetxt">Offline</span></span>
-        <button class="btn" data-act="chart" title="Toggle chart overlay">${ICON_CHART}</button>
-        <button class="btn" data-act="collapse" title="Collapse · Alt+W hides">${ICON_COLLAPSE}</button>
+        <button class="btn" data-act="chart" data-tip="Show or hide Paper Route's lines on papertrade's chart: the order-flow projection, your trade's entry, stop and take profit, papertrade's bust and Hyperliquid's liquidation price." aria-label="Toggle chart overlay">${ICON_CHART}</button>
+        <button class="btn" data-act="collapse" data-tip="Collapse the HUD. Alt+W hides it completely." aria-label="Collapse">${ICON_COLLAPSE}</button>
       </div>
     </div>
     <div class="body">
       <div class="ref">
         <div class="ref-l">
-          <span class="mkt-row"><b class="mkt">—</b><span class="tag">Hyperliquid mid</span></span>
+          <span class="mkt-row"><b class="mkt">—</b><span class="tag">${tipped("Hyperliquid mid", "The live mid price on Hyperliquid. Papertrade prices off it to within about 1 bp, so this is the price your stops and take profits are watched against.")}</span></span>
           <span class="px">—</span>
         </div>
-        <div class="stat"><span class="lbl">Regime</span><span class="regime">—</span></div>
       </div>
-      <section class="flow">
-        <div class="sec-h"><span class="cap">Order flow</span><span class="cap-r fx-lead">—</span></div>
+      <section class="flow acc">
+        <div class="sec-h" data-acc>
+          <span class="sec-t"><i class="chev">${ICON_CHEVRON}</i><span class="cap">${tipped("Order flow", FLOW_TIP)}</span></span>
+          <span class="cap-r fx-lead">—</span>
+        </div>
+        <div class="acc-b">
+        <div class="fx-regime"><span class="lbl">${tipped("Volatility regime", "How fast price is moving over the last 10 minutes: calm, normal or wild. The lean is least reliable when it's wild.")}</span><span class="regime">—</span></div>
         <div class="fx-gauge"><div class="fx-track"><i class="fx-fill"></i><b class="fx-needle"></b></div><span class="fx-score">—</span></div>
         <div class="ladder"></div>
         <div class="fx-comps"></div>
         <div class="fx-note"></div>
+        </div>
       </section>
     </div>
     <div class="foot"><span class="model">Hyperliquid public data</span><span class="err"></span><span class="meta">—</span></div>`;
-  root.append(style, overlay, hud);
+  const tooltip = document.createElement("div");
+  tooltip.className = "tooltip";
+  tooltip.setAttribute("role", "tooltip");
+  root.append(style, overlay, hud, tooltip);
   document.documentElement.append(host);
 
   const $ = (sel) => hud.querySelector(sel);
@@ -159,7 +179,7 @@
     for (const c of COMPONENTS) {
       const k = c.keys.find((x) => used.includes(x)) ?? c.keys[0];
       const row = el("div", "fx-c");
-      row.title = c.hint;
+      row.dataset.tip = c.hint;
       const name = el("span", "fx-cn", c.label);
       const win = WINDOW_OF(k);
       if (win) name.append(el("small", null, ` ${win}`));
@@ -173,6 +193,61 @@
       compEls.set(c.label, { key: k, unit: c.unit, bar, val, row });
     }
   }
+
+  // ---------- tooltips ----------
+  // One floating tooltip for every [data-tip] in the HUD. It lives outside .hud so the panel's
+  // overflow never clips it, and flips below the trigger when there's no room above.
+  let tipFor = null;
+  function showTip(target) {
+    if (tipFor === target) return;
+    tipFor = target;
+    tooltip.textContent = target.dataset.tip;
+    tooltip.classList.add("on");
+    const r = target.getBoundingClientRect();
+    const t = tooltip.getBoundingClientRect();
+    const left = Math.max(8, Math.min(window.innerWidth - t.width - 8, r.left + r.width / 2 - t.width / 2));
+    const above = r.top - t.height - 8;
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${above >= 8 ? above : r.bottom + 8}px`;
+  }
+  function hideTip() {
+    tipFor = null;
+    tooltip.classList.remove("on");
+  }
+  hud.addEventListener("pointerover", (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (t) showTip(t);
+    else hideTip();
+  });
+  hud.addEventListener("pointerleave", hideTip);
+  hud.addEventListener("focusin", (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (t) showTip(t);
+  });
+  hud.addEventListener("focusout", hideTip);
+  hud.addEventListener("scroll", hideTip, true);
+
+  // ---------- accordions ----------
+  // A section with class "acc" folds at its [data-acc] header; open/closed is remembered per key.
+  const accOpen = {};
+  function accordion(section, key, openByDefault) {
+    section.dataset.accKey = key;
+    section.classList.toggle("collapsed", !(accOpen[key] ?? openByDefault));
+    section.querySelector("[data-acc]").addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      accOpen[key] = !section.classList.toggle("collapsed");
+      chrome.storage.local.set({ hudSections: accOpen });
+      hideTip();
+    });
+  }
+  const accReady = chrome.storage.local.get({ hudSections: {} }).then(({ hudSections }) => {
+    Object.assign(accOpen, hudSections);
+    for (const sec of hud.querySelectorAll("[data-acc-key]")) {
+      const k = sec.dataset.accKey;
+      if (k in accOpen) sec.classList.toggle("collapsed", !accOpen[k]);
+    }
+  });
+  accordion(hud.querySelector("section.flow"), "flow", false);
 
   const frameListeners = [];
 
@@ -232,7 +307,8 @@
     }
     const s = idx.score;
     const leadH = idx.horizons.find((h) => h.s === idx.lead);
-    els.lead.textContent = `${idx.lead}s lean${leadH?.ic != null ? ` · IC ${leadH.ic.toFixed(2)}` : ""}${f.provisional ? " · provisional" : ""}`;
+    els.lead.textContent = `${s >= 0 ? "+" : "−"}${Math.abs(s).toFixed(0)} · ${idx.lead}s lean${f.provisional ? " · provisional" : ""}`;
+    els.lead.className = `cap-r fx-lead ${Math.abs(s) < LEAN_AT ? "" : s > 0 ? "up" : "dn"}`;
     els.score.textContent = `${s >= 0 ? "+" : "−"}${Math.abs(s).toFixed(0)}`;
     els.score.className = `fx-score ${Math.abs(s) < LEAN_AT ? "" : s > 0 ? "up" : "dn"}`;
     const w = Math.abs(s) / 100;
@@ -676,7 +752,14 @@
   window.__wfHud = {
     root,
     body: hud.querySelector(".body"),
+    flow: hud.querySelector("section.flow"),
     el,
+    tipped,
+    icons: { chevron: ICON_CHEVRON },
+    accordion: (section, key, openByDefault) => {
+      accordion(section, key, openByDefault);
+      accReady.then(() => key in accOpen && section.classList.toggle("collapsed", !accOpen[key]));
+    },
     fmtPx,
     fmtPct,
     market: () => state.frame,
