@@ -46,9 +46,10 @@
         <div class="hx-plan"></div>
         <div class="hx-fast" data-tip="Papertrade queues opens and closes, sometimes for minutes. Higher-notional orders tend to be filled sooner, so a bigger size usually means less waiting. Size is capped by both venues' balances and your max hedge setting."></div>
         <div class="hx-actions">
-          <button class="pbtn primary" data-act="hedge" data-tip="One-off: trade Hyperliquid now so it exactly offsets your papertrade position. Asks you to confirm first.">Hedge to 100%</button>
-          <label class="switch" data-tip="Tether on: Hyperliquid follows papertrade automatically. When a papertrade open or close fills (after papertrade's queue), Hyperliquid opens or closes the opposite side."><input type="checkbox" class="hx-auto" /><span></span><em>Tether</em></label>
+          <label class="switch" data-tip="Tether on: Hyperliquid follows papertrade automatically. When a papertrade open or close fills (after papertrade's queue), Hyperliquid opens or closes the opposite side."><input type="checkbox" class="hx-auto" /><span></span><em>Auto-hedge (Tether)</em></label>
+          <span class="hx-band" data-tip="Tether leaves gaps smaller than this alone, so it doesn't trade on every small move. Change it in settings (Rebalance when off by).">—</span>
         </div>
+        <button class="pbtn primary hx-hedge" data-act="hedge" hidden data-tip="One-off, for when Tether is off: trade Hyperliquid once so it exactly offsets your open papertrade position. You confirm the size and fees first.">Hedge now</button>
         <div class="hx-grid">
           <span class="lbl" data-tip="Papertrade profit or loss if you closed now, after papertrade's fee on wins">Paper P&amp;L</span><span class="hx-ptpnl">—</span>
           <span class="lbl" data-tip="Hyperliquid profit or loss on the hedge, including funding paid or received">HL P&amp;L</span><span class="hx-hlpnl">—</span>
@@ -431,11 +432,13 @@
     deltaFill.className = d.deltaUsd >= 0 ? "up" : "dn";
     deltaFill.style.transform = `scaleX(${Math.min(1, Math.abs(d.deltaUsd) / scale)})`;
 
-    hedgeBtn.disabled = !!s.busy || !canTrade || Math.abs(d.deltaUsd) < 10;
-    hedgeBtn.textContent = s.busy ?? "Hedge to 100%";
+    // The one-off hedge only matters when Tether isn't already closing the gap, and there is one
+    hedgeBtn.hidden = !s.busy && (s.auto || off < 10);
+    hedgeBtn.disabled = !!s.busy || !canTrade;
+    hedgeBtn.textContent = s.busy ?? `Hedge the ${usd(off, 0)} gap now`;
     ui["hx-auto"].checked = s.auto;
     ui["hx-auto"].disabled = !canTrade;
-    ui["hx-auto"].parentElement.querySelector("em").textContent = `Tether · ±$${s.settings.bandUsd}`;
+    q(".hx-band").textContent = `±$${s.settings.bandUsd} band`;
 
     renderPlan();
 
@@ -578,7 +581,7 @@
     const stop = s.alerts.find((a) => /^Tether stopped/.test(a.text) && Date.now() - a.at < STOPPED_SHOWN_MS);
     if (stop) return setStatus("Stopped", "dn", `${stop.text}. Fix that, then turn Tether back on.`, true);
     if (trade) return setStatus("Linked by trade", "up", "Your hedged trade is managing the Hyperliquid leg. Turn on Tether to also follow positions you open by hand.");
-    if (open && off > band) return setStatus("Not linked", "warn", `Tether is off and the legs are off by ${usd(off, 0)}. Turn it on to hedge, or press Hedge to 100% once.`, true);
+    if (open && off > band) return setStatus("Not linked", "warn", `Tether is off and the legs are off by ${usd(off, 0)}. Turn on auto-hedge, or hedge the gap once below.`, true);
     return setStatus("Not linked", "", "Tether is off: trades you place on papertrade won't be hedged on Hyperliquid.", true);
   }
 
@@ -653,7 +656,7 @@
         await send("setAuto", { on: true });
         flash("ok", "Tether on: papertrade fills are now hedged on Hyperliquid", ui["hx-tether-on"]);
       }
-      else if (act === "hedge") confirm(hedgePreview(), () => send("hedgeNow"), { anchor: q(".hx-actions") });
+      else if (act === "hedge") confirm(hedgePreview(), () => send("hedgeNow"), { anchor: hedgeBtn });
       else if (act === "lev" || act === "mode") {
         const btn = e.target.closest("[data-act]");
         const leverage = act === "lev" ? Number(btn.dataset.lev) : snap.settings.hlLeverage;
@@ -699,7 +702,7 @@
         ui["hx-pass"].value = "";
       }
     } catch (err) {
-      const near = { lev: q(".hx-lev"), mode: q(".hx-lev"), hedge: q(".hx-actions"), toPt: q(".hx-rebal-row"), toHl: q(".hx-rebal-row"), "tether-on": ui["hx-tether-on"], unlock: ui["hx-unlock"] }[act];
+      const near = { lev: q(".hx-lev"), mode: q(".hx-lev"), hedge: hedgeBtn, toPt: q(".hx-rebal-row"), toHl: q(".hx-rebal-row"), "tether-on": ui["hx-tether-on"], unlock: ui["hx-unlock"] }[act];
       flash("error", String(err.message || err), near ?? confirmAnchor);
     }
   });
