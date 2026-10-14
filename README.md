@@ -83,8 +83,9 @@ and place trades on papertrade's order ticket as usual.
 If a trade is too small for papertrade's minimum, the panel says what to change (usually a higher Hyperliquid
 leverage, or more USDC).
 
-The market follows the papertrade page: `/trade/btc` hedges BTC, `/trade/eth` hedges ETH. While Tether is
-holding an open position, Paper Route stays on that coin until it's flat.
+BTC and ETH are hedged at the same time, each on its own: its own Tether switch, Hyperliquid leverage and
+safety net. The papertrade page you're on only decides which coin the panel shows in full; the other coin gets a
+one-line status underneath. Connecting turns Tether on for both.
 
 ## Keep it running
 
@@ -105,7 +106,7 @@ Tether, stop losses and take profits run **in your browser**. While any of them 
    copy and **Load unpacked** the new one instead.
 3. Refresh papertrade.
 
-The extension ID is fixed, so your encrypted key, trading key, settings and saved trades carry over either way.
+The extension ID is fixed, so your encrypted key, trading key, settings and TP/SL levels carry over either way.
 Don't load two versions at once.
 
 ## Features in detail
@@ -189,7 +190,7 @@ git clone https://github.com/WayfinderFoundation/paper-route.git
 cd paper-route
 npm ci
 npm run build          # dev build into dist/; load the repo folder unpacked (auto-reloads on file changes)
-npm test               # offline tests: hedged-trade state machine, capacity maths, order idempotency, flow features
+npm test               # offline tests: per-coin Tether, TP/SL, safety net, order idempotency, flow features
 npm run build:release  # release/paper-route-<version>.zip (refuses to package anything that looks like a key)
 ```
 
@@ -251,18 +252,19 @@ index to about 1e-4. Formulas are at the top of `src/flowindex.js`; weights are 
 
 | File | Role |
 |---|---|
-| `src/hedge.js` | Hedge engine: papertrade account stream, Hyperliquid account polling, tether, rebalancing, key handling |
+| `src/hedge.js` | Hedge engine: one Tether lane per coin over a shared papertrade stream and Hyperliquid account read; rebalancing, key handling |
+| `src/exits.js` | Stop loss / take profit watcher (closes through papertrade's Close button) |
+| `src/safetynet.js` | Plans the reduce-only orders at papertrade's liquidation prices |
 | `src/papertrade.js` | Papertrade public endpoints: account stream, trading limits, open-interest room, win fee, deposit address |
 | `src/hl.js` | Hyperliquid client: idempotent orders (cloid + status check), leverage, transfers, approvals |
-| `src/capacity.js` | Max size both venues can carry |
 | `src/market.js`, `src/flowindex.js` | Hyperliquid websocket → order-flow features and index (pure, tested) |
 | `src/vault.js` | Passphrase-encrypted key storage (non-extractable device key + AES-GCM) |
 | `content.js`, `hedge-ui.js` | HUD and chart layer; papertrade orders go through papertrade's own ticket and Close buttons |
 | `chart-bridge.js` | Reads papertrade's chart price/time mapping from its canvas draws (it has no public chart API) |
 
-Papertrade has no trading API you can sign for, so orders are placed by filling in papertrade's own order ticket
-and clicking its buttons in your signed-in tab. Keep a papertrade tab open (and preferably visible: Chrome
-throttles hidden tabs) while Tether is running.
+Papertrade has no trading API you can sign for, so a stop loss or take profit closes the position by clicking
+papertrade's own Close button in your signed-in tab (Paper Route opens one if none is open). Tether only trades
+Hyperliquid, so it needs no papertrade tab.
 
 ## Risks
 

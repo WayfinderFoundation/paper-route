@@ -12,7 +12,10 @@ const TICK_MS = 500;
 const CLOSE_RESEND_MS = 6_000;
 const CLOSE_ALERT_MS = 45_000;
 const PENDING_TTL_MS = 10 * 60_000; // a queued open older than this isn't the order the levels were for
-const MATCH_SLACK_MS = 5_000; // papertrade's openedAtMs is block time, a little before or after the click
+const MATCH_SLACK_MS = 5_000;
+const PUSH_STALE_MS = 3_000; // no pushed price for this long: fetch one instead
+const POLL_GAP_MS = 2_000;
+const UNWATCHED_MS = 8_000; // and no price at all for this long: tell the user // papertrade's openedAtMs is block time, a little before or after the click
 
 export function levelFromTarget(target, side, pos) {
   if (!target || !(target.value > 0)) return null;
@@ -40,7 +43,8 @@ export function checkLevels({ isLong, entry, tpPx, slPx }) {
 // ctx: { positions(mids): [{ id, coin, isLong, entry, size, margin, bust, openedAtMs }] (every coin it can
 //        decode; papertrade's raw prices are read against each coin's mid),
 //        readableCoins(mids): coins whose positions(mids) is complete,
-//        closeQueued(id), ptLive(), subscribeMid(coin, fn) → stop, exec, alert, emit }
+//        closeQueued(id), ptLive(), subscribeMid(coin, fn) → stop, mid(coin) → price (one-off read),
+//        exec, alert, emit }
 export function createExits(ctx) {
   let exits = {}; // positionId → { coin, isLong, entry, tpPx, slPx, state, reason, closeSentAt, attempts, stateAt }
   let pending = null; // { coin, isLong, tp, sl, at, knownIds }
@@ -48,6 +52,8 @@ export function createExits(ctx) {
   const subs = new Map(); // coin → stop()
   let timer = null;
   let stepping = false;
+  const polledAt = {}; // coin → last one-off price read
+  const watchedSince = {}; // coin → when it first needed a price
 
   async function load() {
     const saved = await chrome.storage.local.get(["exits", "pendingExit"]);
@@ -78,10 +84,35 @@ export function createExits(ctx) {
       stop();
       subs.delete(coin);
     }
-    if (!timer && (coins.size || armed().length)) timer = setInterval(tick, TICK_MS);
+    if (!timer && (coins.size || armed().length)) {
+      timer = setInterval(() => {
+        pollStale();
+        tick();
+      }, TICK_MS);
+    }
     if (timer && !coins.size && !armed().length) {
       clearInterval(timer);
       timer = null;
+    }
+  }
+
+  const watchedCoins = () => [...new Set([...armed().map(([, x]) => x.coin), ...(pending ? [pending.coin] : [])])];
+
+  // the price feed is a push socket; if it goes quiet, levels are still checked against a fetched price
+  function pollStale() {
+    const now = Date.now();
+    for (const coin of watchedCoins()) {
+      watchedSince[coin] ??= now;
+      if (now - (mids[coin]?.at ?? 0) < PUSH_STALE_MS || now - (polledAt[coin] ?? 0) < POLL_GAP_MS) continue;
+      polledAt[coin] = now;
+      ctx.mid(coin).then(
+        (px) => {
+          if (!(px > 0)) return;
+          mids[coin] = { px, at: Date.now() };
+          check(coin);
+        },
+        () => {},
+      );
     }
   }
 
@@ -218,6 +249,8 @@ export function createExits(ctx) {
     return {
       byPosition: Object.fromEntries(Object.entries(exits).filter(([, x]) => x.state !== "done").map(([id, x]) => [id, { ...x }])),
       pending: pending ? { ...pending } : null,
+      // coins with levels whose price hasn't been read lately: nothing can trigger on them
+      unwatched: watchedCoins().filter((c) => Date.now() - (mids[c]?.at ?? watchedSince[c] ?? Date.now()) > UNWATCHED_MS),
     };
   }
 

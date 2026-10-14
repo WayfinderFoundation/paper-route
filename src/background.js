@@ -9,7 +9,7 @@ let lastPublish = 0;
 let publishTimer = null;
 let latest = null;
 
-// toolbar badge: "ON" while Paper Route is responsible for positions (a round, or tether holding one)
+// toolbar badge: "ON" while Paper Route is responsible for positions (Tether holding a position, or TP/SL armed)
 let badgeOn = null;
 function setBadge(on) {
   if (on === badgeOn) return;
@@ -144,8 +144,8 @@ async function reconfigure() {
 }
 
 const COMMANDS = {
-  hedgeNow: () => engine.hedgeNow("manual"),
-  setAuto: ({ on }) => engine.setAuto(on),
+  hedgeNow: ({ coin } = {}) => engine.hedgeNow({ coin }),
+  setAuto: ({ on, coin }) => engine.setAuto({ on, coin }),
   setLeverage: (args) => engine.setLeverage(args),
   sendToPapertrade: ({ amount, secret }) => engine.sendToPapertrade(amount, secret ?? null),
   // One step: the key the user pastes is used once, in memory, to approve a trading key (trades, can't
@@ -167,9 +167,10 @@ const COMMANDS = {
     await forget();
     await chrome.storage.local.remove("vaultLabel");
     await chrome.storage.local.set({ connection: { mode, address, at: Date.now() } });
-    // connecting is for hedging: Tether starts on (for the coin papertrade is showing) and the engine
-    // turns it on as soon as both venues are live; the user can switch it off in the panel
-    await chrome.storage.local.set({ tether: { coin: engine.coin(), hedgeWallet: address } });
+    // connecting is for hedging: Tether starts on for every coin and the engine turns it on as soon as
+    // both venues are live; the user can switch each coin off in the panel
+    const coins = Object.fromEntries(engine.coins().map((c) => [c, true]));
+    await chrome.storage.local.set({ tether: { hedgeWallet: address, coins } });
     await engine.configure(await loadSettings());
     return { address, agent };
   },
@@ -179,10 +180,7 @@ const COMMANDS = {
     await chrome.storage.local.remove(["connection", "vaultLabel"]);
     await engine.refreshVault();
   },
-  scheduleRound: (spec) => engine.scheduleRound(spec),
-  cancelRound: ({ id }) => engine.cancelRound(id),
   setSessionWallet: ({ address }) => engine.setSessionWallet({ address }),
-  exitRound: () => engine.exitRound(),
   setPageCoin: ({ coin }) => engine.setPageCoin({ coin }),
   setExit: (args) => engine.setExit(args),
   armExit: (args) => engine.armExit(args),
@@ -287,12 +285,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.hedgeSettings) return;
   if (changes.hedgeSettingsQuiet) return; // written by the engine itself (leverage change)
   reconfigure();
-});
-
-// a scheduled round sets an alarm a couple of seconds before its time, so the worker is
-// awake (and resumes persisted rounds) even if nothing else kept it running
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name.startsWith("round:")) engine.wakeRounds();
 });
 
 fillHedgeWalletFromKey().finally(reconfigure);

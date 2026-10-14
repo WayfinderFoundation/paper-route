@@ -1,4 +1,4 @@
-// HUD hedge + rounds sections. Renders hedge-engine snapshots from the service worker and sends
+// HUD Tether section. Renders hedge-engine snapshots from the service worker and sends
 // commands back. Every fund-moving command goes through an inline confirm row first.
 (() => {
   const hud = window.__wfHud;
@@ -22,6 +22,7 @@
     </div>
     <div class="hx-body">
       <div class="hx-status-t"></div>
+      <div class="hx-lanes"></div>
       <div class="hx-confirm" hidden>
         <span class="hx-confirm-t"></span>
         <input class="field hx-xkey" type="password" autocomplete="off" spellcheck="false" hidden placeholder="Paste your Hyperliquid key to sign this transfer" data-tip="Transfers need your wallet's own key (the trading key can't move funds). It's used for this transfer only and not saved." />
@@ -118,7 +119,7 @@
 
   function renderAccount() {
     const h = snap?.hl.account;
-    acctSec.hidden = !snap?.settings.hedgeWallet || !snap.pt.summary || !h || !!snap.lockedBy;
+    acctSec.hidden = !snap?.settings.hedgeWallet || !snap.pt.summary || !h;
     acct.hidden = !snap?.settings.hedgeWallet;
     if (acct.hidden) return;
     aq(".hla-addr").textContent = short(snap.settings.hedgeWallet);
@@ -165,7 +166,7 @@
 
   const q = (s) => card.querySelector(s) ?? acctSec.querySelector(s);
   const ui = Object.fromEntries(
-    ["hx-signer", "hx-empty", "hx-main", "hx-pt", "hx-hl", "hx-dtext", "hx-pct", "hx-auto", "hx-ptpnl", "hx-hlpnl", "hx-net-pnl", "hx-bust", "hx-liq", "hx-ptav", "hx-ptq", "hx-hleq", "hx-hlw", "hx-sugg", "hx-amt", "hx-confirm", "hx-confirm-t", "hx-unlock", "hx-pass", "hx-alerts", "hx-levs", "hx-mode", "hx-plan", "hx-netline", "hx-status", "hx-status-t", "hx-xkey", "hx-tether-on", "hx-fast"].map((c) => [c, q(`.${c}`)]),
+    ["hx-signer", "hx-empty", "hx-main", "hx-pt", "hx-hl", "hx-dtext", "hx-pct", "hx-auto", "hx-ptpnl", "hx-hlpnl", "hx-net-pnl", "hx-bust", "hx-liq", "hx-ptav", "hx-ptq", "hx-hleq", "hx-hlw", "hx-sugg", "hx-amt", "hx-confirm", "hx-confirm-t", "hx-unlock", "hx-pass", "hx-alerts", "hx-levs", "hx-mode", "hx-plan", "hx-netline", "hx-status", "hx-status-t", "hx-xkey", "hx-tether-on", "hx-lanes", "hx-fast"].map((c) => [c, q(`.${c}`)]),
   );
   const deltaFill = q(".hx-delta .bar i");
   const hedgeBtn = q('[data-act="hedge"]');
@@ -201,6 +202,7 @@
       reportedCoin = undefined;
       snap = null;
       render();
+      for (const fn of snapListeners) fn(null);
       setTimeout(connect, 2000);
     });
   }
@@ -252,10 +254,10 @@
     });
   }
 
-  // ---------- papertrade execution (asked for by the round scheduler in the worker) ----------
-  // Papertrade has no API we can sign for (its embedded wallet + session key sign intents), so
-  // rounds drive papertrade's own order ticket and Close buttons in this signed-in tab.
-  const EXEC = { ptOpen, ptClose };
+  // ---------- papertrade execution (asked for by the TP/SL watcher in the worker) ----------
+  // Papertrade has no API we can sign for (its embedded wallet + session key sign intents), so a
+  // stop loss or take profit clicks papertrade's own Close button in this signed-in tab.
+  const EXEC = { ptClose };
 
   async function runExec({ id, action, args }) {
     try {
@@ -283,42 +285,6 @@
       });
       obs.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
     });
-  }
-
-  // React tracks input values; the native setter + an input event is what a keystroke does
-  function setReactInput(input, value) {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-    setter.call(input, String(value));
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  function tradeButton() {
-    return [...document.querySelectorAll("button")].find((b) => /^Place Trade/.test(b.textContent.trim()));
-  }
-
-  async function ptOpen({ coin, isLong, marginUsd, leverage }) {
-    const startMs = Date.now();
-    if (!location.pathname.toLowerCase().includes(`/trade/${coin.toLowerCase()}`)) throw new Error(`Not on papertrade's ${coin} trade page`);
-    const sideBtn = document.querySelector(isLong ? "button.dup" : "button.ddn");
-    const im = document.getElementById("im");
-    const il = document.getElementById("il");
-    if (!sideBtn || !im || !il) throw new Error("Papertrade order ticket not found");
-    if (sideBtn.getAttribute("aria-pressed") !== "true") sideBtn.click();
-    // the ticket keeps margin and leverage between trades: rewriting unchanged values only costs a render
-    if (Number(im.value) !== marginUsd) setReactInput(im, marginUsd);
-    if (Number(il.value) !== leverage) setReactInput(il, leverage);
-    await settle(() => sideBtn.getAttribute("aria-pressed") === "true" && Number(im.value) === marginUsd && Number(il.value) === leverage && tradeButton()?.disabled === false);
-    if (sideBtn.getAttribute("aria-pressed") !== "true") throw new Error("Couldn't select the side on papertrade's ticket");
-    if (Number(im.value) !== marginUsd || Number(il.value) !== leverage) throw new Error(`Ticket shows $${im.value} × ${il.value}x, expected $${marginUsd} × ${leverage}x`);
-    const place = tradeButton();
-    if (!place) {
-      const hint = [...document.querySelectorAll("button")].map((b) => b.textContent.trim()).find((t) => /Authenticate|Connect|Enable|Read-only|Switch/.test(t));
-      throw new Error(`Papertrade isn't ready to trade${hint ? ` (shows "${hint}")` : ""}`);
-    }
-    if (place.disabled) throw new Error("Place Trade is disabled on papertrade (balance, minimum size or trading paused)");
-    place.click();
-    return { clicked: true, startMs, clickMs: Date.now(), hidden: document.hidden };
   }
 
   async function ptClose({ positionId }) {
@@ -356,12 +322,10 @@
     managing = !!snap?.managing;
     banner.hidden = !managing;
     if (!managing) return;
-    const r = (snap.rounds ?? []).find((x) => !["done", "failed", "cancelled"].includes(x.state));
-    banner.textContent = r
-      ? r.state === "scheduled"
-        ? `A hedged trade is scheduled for ${r.label}. Keep Chrome open and Paper Route enabled until it has run and closed.`
-        : "Paper Route is managing your exits. Keep Chrome open and Paper Route enabled until both legs close."
-      : "Tether is holding a hedged position. Keep Chrome open and Paper Route enabled while it's open.";
+    const held = Object.values(snap.lanes ?? {}).filter((l) => l.auto && l.open).map((l) => l.coin);
+    banner.textContent = held.length
+      ? `Tether is holding hedged ${held.join(" and ")} positions. Keep Chrome open and Paper Route enabled while they're open.`
+      : "Paper Route is watching your stop loss / take profit levels. Keep Chrome open and Paper Route enabled until they close.";
   }
   window.addEventListener("beforeunload", (e) => {
     if (!managing) return;
@@ -369,22 +333,16 @@
     e.returnValue = ""; // Chrome shows its own "Leave site?" text
   });
 
-  // chart lines: the open round's entry / stop / take profit, papertrade's bust and HL's liquidation
+  // chart lines: TP/SL levels, papertrade's bust and HL's liquidation, for the coin on screen
   function syncLevels() {
     const levels = [];
-    const r = (snap?.rounds ?? []).find((x) => ["hedging", "live", "closing"].includes(x.state) && x.entry);
-    if (r) {
-      levels.push({ price: r.entry, label: `Entry ${r.isLong ? "long" : "short"}`, kind: "entry" });
-      if (r.stopPx != null) levels.push({ price: r.stopPx, label: `Stop ${r.stopPct}%`, kind: "stop" });
-      if (r.limitPx != null) levels.push({ price: r.limitPx, label: `Take profit ${r.limitPct}%`, kind: "limit" });
-    }
     for (const [id, x] of Object.entries(snap?.exits?.byPosition ?? {})) {
       if (x.coin !== snap.settings.coin) continue;
       const tag = Object.keys(snap.exits.byPosition).length > 1 ? ` #${id.slice(-4)}` : "";
       if (x.tpPx != null) levels.push({ price: x.tpPx, label: `Take profit${tag}`, kind: "limit" });
       if (x.slPx != null) levels.push({ price: x.slPx, label: `Stop loss${tag}`, kind: "stop" });
     }
-    if (snap && !snap.lockedBy) {
+    if (snap) {
       if (snap.pt.summary?.bust) levels.push({ price: snap.pt.summary.bust, label: "Paper bust", kind: "bust" });
       if (snap.hl.account?.liqPx) levels.push({ price: snap.hl.account.liqPx, label: "HL liq", kind: "liq" });
     }
@@ -420,13 +378,8 @@
         : "Not connected. Click the Paper Route toolbar icon, paste your key and click Connect.";
     ui["hx-unlock"].hidden = v.unlocked || !v.remembered;
     renderTetherStatus(s, canTrade);
+    renderLanes(s);
 
-    if (s.lockedBy) {
-      ui["hx-main"].hidden = true;
-      ui["hx-empty"].hidden = false;
-      ui["hx-empty"].textContent = `Still managing ${s.settings.coin} (${s.lockedBy === "round" ? "a hedged trade is running" : "Tether is holding an open position"}). Open the ${s.settings.coin} page to see it. ${s.pageCoin} takes over once it's flat.`;
-      return;
-    }
     if (!s.settings.ptWallet || !s.settings.hedgeWallet) {
       ui["hx-main"].hidden = true;
       ui["hx-empty"].hidden = true; // the status line says what to do
@@ -602,18 +555,33 @@
     }
     const off = Math.abs(s.delta?.deltaUsd ?? 0);
     const open = pt.netSize !== 0 || h.size !== 0;
-    const trade = (s.rounds ?? []).find((r) => r.hedge && ["opening", "hedging", "live", "closing", "flattening"].includes(r.state));
+    const coin = s.settings.coin;
     if (s.auto) {
-      if (s.hold) return setStatus("Linked", "up", "Linked. Papertrade's close is queued, so Hyperliquid stays hedged until it fills.");
       if (!open) return setStatus("Linked", "up", "Linked and waiting. When a papertrade position fills, Hyperliquid opens the opposite side.");
       if (off > band) return setStatus("Rebalancing", "warn", `Linked, catching up: the legs are off by ${usd(off, 0)}, so Hyperliquid is being traded to match papertrade.`);
       return setStatus("Linked", "up", `Linked. Hyperliquid holds the opposite of your papertrade position and follows its fills.`);
     }
-    const stop = s.alerts.find((a) => /^Tether stopped/.test(a.text) && Date.now() - a.at < STOPPED_SHOWN_MS);
+    const stop = s.alerts.find((a) => a.text.startsWith(`${coin} Tether stopped`) && Date.now() - a.at < STOPPED_SHOWN_MS);
     if (stop) return setStatus("Stopped", "dn", `${stop.text}. Fix that, then turn Tether back on.`, true);
-    if (trade) return setStatus("Linked by trade", "up", "Your hedged trade is managing the Hyperliquid leg. Turn on Tether to also follow positions you open by hand.");
     if (open && off > band) return setStatus("Not linked", "warn", `Tether is off and the legs are off by ${usd(off, 0)}. Turn on auto-hedge, or hedge the gap once below.`, true);
     return setStatus("Not linked", "", "Tether is off: trades you place on papertrade won't be hedged on Hyperliquid.", true);
+  }
+
+  // the other coins: Tether runs on each independently; this page only shows one
+  function renderLanes(s) {
+    const others = Object.values(s.lanes ?? {}).filter((l) => l.coin !== s.settings.coin);
+    const rows = others.map((l) => {
+      const row = el("div", "hx-lane");
+      const leg = (v) => (v ? `${v > 0 ? "long" : "short"} ${qty(v)}` : "flat");
+      const off = Math.abs(l.deltaUsd ?? 0);
+      const state = !l.auto ? "Tether off" : !l.open ? "Tether on · flat" : off > s.settings.bandUsd ? `Tether on · rebalancing (off ${usd(off, 0)})` : "Tether on · hedged";
+      row.append(el("b", null, l.coin), el("span", `hx-lane-s ${l.auto ? (l.open && off > s.settings.bandUsd ? "warn" : "up") : l.open ? "warn" : ""}`, state));
+      if (l.open) row.append(el("span", "hx-lane-legs", `paper ${leg(l.paper)} · HL ${leg(l.hedge)}`));
+      row.dataset.tip = `${l.coin} runs on its own, whichever page you're on. Open papertrade's ${l.coin} page to change its Tether, leverage or hedge.`;
+      return row;
+    });
+    ui["hx-lanes"].replaceChildren(...rows);
+    ui["hx-lanes"].hidden = !rows.length || !s.settings.hedgeWallet;
   }
 
   function renderSafetyNet() {
@@ -688,20 +656,24 @@
         if (e.currentTarget === acctSec) chrome.storage.local.set({ acctsOpen: open });
       }
       else if (act === "tether-on") {
-        await send("setAuto", { on: true });
+        await send("setAuto", { on: true, coin: snap.settings.coin });
         flash("ok", "Tether on: papertrade fills are now hedged on Hyperliquid", ui["hx-tether-on"]);
       }
-      else if (act === "hedge") confirm(hedgePreview(), () => send("hedgeNow"), { anchor: hedgeBtn });
+      else if (act === "hedge") {
+        const coin = snap.settings.coin;
+        confirm(hedgePreview(), () => send("hedgeNow", { coin }), { anchor: hedgeBtn });
+      }
       else if (act === "lev" || act === "mode") {
         const btn = e.target.closest("[data-act]");
         const leverage = act === "lev" ? Number(btn.dataset.lev) : snap.settings.hlLeverage;
         const cross = act === "mode" ? btn.dataset.cross === "1" : snap.settings.hlCross;
         const live = (snap.vault.unlocked || snap.vault.agent) && snap.hl.account;
+        const coin = snap.settings.coin;
         confirm(
           live
             ? `Set ${snap.settings.coin} leverage on Hyperliquid to ${leverage}x ${cross ? "cross" : "isolated"}`
             : `Save ${leverage}x ${cross ? "cross" : "isolated"}. It's applied on Hyperliquid before the first hedge order.`,
-          () => send("setLeverage", { leverage, cross }),
+          () => send("setLeverage", { leverage, cross, coin }),
           { anchor: q(".hx-lev") },
         );
       }
@@ -746,7 +718,7 @@
 
   ui["hx-auto"].addEventListener("change", async (e) => {
     try {
-      await send("setAuto", { on: e.target.checked });
+      await send("setAuto", { on: e.target.checked, coin: snap.settings.coin });
     } catch (err) {
       e.target.checked = false;
       flash("error", String(err.message || err), q(".hx-actions"));

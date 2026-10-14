@@ -473,3 +473,16 @@ button[data-tip], label[data-tip], input[data-tip] { cursor: pointer; }
 .hla-pnl { text-align: right; white-space: nowrap; font-weight: 500; }
 .hla-px, .hla-liq { color: var(--muted); white-space: nowrap; }
 .hla-liq { text-align: right; }
+
+/* other coins' Tether lanes, one compact line each */
+.hx-lanes { display: grid; gap: 4px; margin: -4px 0 10px; }
+.hx-lanes[hidden] { display: none; }
+.hx-lane { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; font-size: 12px; line-height: 16px; padding: 8px 10px; border-radius: 10.5px; background: var(--surface-1); color: var(--muted); }
+.hx-lane b { color: var(--fg); font-weight: 600; }
+/* tone as a dot, like the other status lines */
+.hx-lane-s { display: inline-flex; align-items: center; gap: 6px; }
+.hx-lane-s::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--surface-3); }
+.hx-lane-s.up::before { background: var(--primary); }
+.hx-lane-s.warn::before { background: var(--amber); }
+.hx-lane-s.up, .hx-lane-s.warn { color: var(--fg); }
+.hx-lane-legs { margin-left: auto; font-variant-numeric: tabular-nums; }
