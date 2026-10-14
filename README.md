@@ -8,6 +8,8 @@
   It follows papertrade's *fills*, not your clicks, so queued orders never leave you one-sided.
 - **Safety net**: if papertrade liquidates you while your browser is closed, Hyperliquid closes the hedge at the
   same price.
+- **Stop loss and take profit** on papertrade, which has neither: set them in the order form or on any open
+  position, by price, % return or $.
 - **Order-flow overlay**: a live read of Hyperliquid's order book and trades, drawn on papertrade's chart.
 
 BTC and ETH. Everything runs in your browser; there's no Paper Route server.
@@ -72,7 +74,7 @@ holding an open position, Paper Route stays on that coin until it's flat.
 
 ## Keep it running
 
-Tether runs **in your browser**. While it's holding a position:
+Tether, stop losses and take profits run **in your browser**. While any of them is active:
 
 - **Keep Chrome open and Paper Route enabled.** The toolbar icon shows **ON** and the panel shows an amber banner
   while Paper Route is responsible for positions.
@@ -103,6 +105,21 @@ lose with. Paper Route holds the opposite position on Hyperliquid, so the pair i
 - a queued papertrade open is not a position yet, so Hyperliquid waits for it to land;
 - a queued papertrade close keeps you exposed, so the Hyperliquid leg stays on until the close fills;
 - if the hedge drifts by more than your band (e.g. you trade papertrade by hand), it trues it up.
+
+### Stop loss and take profit
+
+Papertrade has no stop or take-profit orders, so Paper Route adds them where you'd expect:
+
+- **In the order form:** tick **TP / SL** under Bust Price. Each side has a price box and a gain/loss box
+  (% return on margin, or $), linked so typing one fills in the other, plus quick picks. The levels attach to the
+  position when papertrade fills the order; % and $ targets are worked out from the actual fill price.
+- **On any open position:** the **TP/SL** chip on the row opens an editor for that position. Each position has
+  its own levels, and they're drawn on the chart.
+
+These levels are **not placed on papertrade**. Paper Route watches Hyperliquid's mid (which papertrade tracks to
+under 1 bp) and, when a level is hit, clicks papertrade's own Close button, following papertrade's queue. With
+Tether on, the Hyperliquid hedge closes when that close fills. A level is a trigger, not a price guarantee, and it
+only works while Chrome is open with Paper Route enabled (see [Keep it running](#keep-it-running)).
 
 ### Safety net
 

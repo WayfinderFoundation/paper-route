@@ -171,6 +171,7 @@
       if (msg.kind === "hedge") {
         snap = msg.state;
         render();
+        for (const fn of snapListeners) fn(snap);
       } else if (msg.kind === "result") {
         waiting.get(msg.id)?.(msg);
         waiting.delete(msg.id);
@@ -221,6 +222,10 @@
   }
   setInterval(reportCoin, 1000);
   setTimeout(reportCoin, 300);
+
+  // shared with tpsl-ui.js (same isolated world): engine snapshots and commands
+  const snapListeners = [];
+  window.__wfHedge = { send: (cmd, args) => send(cmd, args), snap: () => snap, onSnap: (fn) => snapListeners.push(fn) };
 
   function send(cmd, args) {
     return new Promise((resolve, reject) => {
@@ -301,7 +306,8 @@
   }
 
   async function ptClose({ positionId }) {
-    const sel = `button[aria-label$=" position ${positionId}"]`;
+    // exactly the Close button: each row also has "Details for BTC position <id>", which comes first
+    const sel = `button[aria-label^="Close "][aria-label$=" position ${positionId}"]`;
     let btn = document.querySelector(sel);
     if (!btn) {
       // the Close buttons live on the Positions tab
@@ -353,6 +359,12 @@
       levels.push({ price: r.entry, label: `Entry ${r.isLong ? "long" : "short"}`, kind: "entry" });
       if (r.stopPx != null) levels.push({ price: r.stopPx, label: `Stop ${r.stopPct}%`, kind: "stop" });
       if (r.limitPx != null) levels.push({ price: r.limitPx, label: `Take profit ${r.limitPct}%`, kind: "limit" });
+    }
+    for (const [id, x] of Object.entries(snap?.exits?.byPosition ?? {})) {
+      if (x.coin !== snap.settings.coin) continue;
+      const tag = Object.keys(snap.exits.byPosition).length > 1 ? ` #${id.slice(-4)}` : "";
+      if (x.tpPx != null) levels.push({ price: x.tpPx, label: `Take profit${tag}`, kind: "limit" });
+      if (x.slPx != null) levels.push({ price: x.slPx, label: `Stop loss${tag}`, kind: "stop" });
     }
     if (snap && !snap.lockedBy) {
       if (snap.pt.summary?.bust) levels.push({ price: snap.pt.summary.bust, label: "Paper bust", kind: "bust" });
@@ -436,7 +448,7 @@
     renderPlan();
 
     const net = pt.uPnlAfterFee + h.uPnl + h.funding;
-    setNum(ui["hx-ptpnl"], pt.uPnlAfterFee, s.winFeeRate ? ` after ${(s.winFeeRate * 100).toFixed(0)}% win fee` : "");
+    setNum(ui["hx-ptpnl"], pt.uPnlAfterFee, "");
     setNum(ui["hx-hlpnl"], h.uPnl + h.funding, h.funding ? ` incl. ${signed(h.funding)} funding` : "");
     setNum(ui["hx-net-pnl"], net, "");
     ui["hx-bust"].textContent = pt.bust ? `${fmtPx(pt.bust)} · ${(s.ptBustDist * 100).toFixed(2)}%` : "—";
@@ -556,6 +568,10 @@
     }
     if (!canTrade) {
       return setStatus("Not connected", "warn", "Connect your Hyperliquid wallet again in settings (click the Paper Route toolbar icon) so Paper Route can place hedge orders on Hyperliquid.");
+    }
+    if (s.auto && (s.pt.status !== "live" || s.hl.status !== "live")) {
+      const which = [s.pt.status !== "live" && "papertrade", s.hl.status !== "live" && "Hyperliquid"].filter(Boolean).join(" and ");
+      return setStatus("Reconnecting", "warn", `Tether is on, but the ${which} connection dropped. It reconnects and resumes by itself; nothing is traded meanwhile.`);
     }
     if (s.pt.status !== "live" || s.hl.status !== "live" || !pt || !h) {
       return setStatus("Connecting", "warn", `Connecting to papertrade (${s.pt.status}) and Hyperliquid (${s.hl.status})…`);

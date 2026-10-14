@@ -184,6 +184,8 @@ const COMMANDS = {
   setSessionWallet: ({ address }) => engine.setSessionWallet({ address }),
   exitRound: () => engine.exitRound(),
   setPageCoin: ({ coin }) => engine.setPageCoin({ coin }),
+  setExit: (args) => engine.setExit(args),
+  armExit: (args) => engine.armExit(args),
   unlock: async ({ passphrase, hours }) => {
     const until = await unlock(passphrase, hours ?? 8);
     await fillHedgeWalletFromKey();

@@ -10,6 +10,7 @@ import { planSafetyNet } from "./safetynet.js";
 import { HL_COST_FRACTION, roundCapacity } from "./capacity.js";
 import { withRetry } from "./retry.js";
 import { createRounds } from "./rounds.js";
+import { createExits } from "./exits.js";
 
 export const INSTRUMENT_IDS = { BTC: 0, ETH: 1 };
 const AGENT_NAME = "paper-route"; // HL agent names are 1–16 chars; re-approving the same name replaces it
@@ -32,13 +33,17 @@ export const HEDGE_DEFAULTS = {
   safetyNet: true,
 };
 
-const HL_POLL_MS = 1000;
+// Hyperliquid account polling. The account only changes when we trade (and we re-read right after
+// every order), so 3 s is plenty; prices come from the shared websocket. See hl.js for the budget.
+const HL_POLL_MS = 3000;
 const LIMITS_POLL_MS = 5000;
 const AUTO_STABLE_MS = 400;
 const AUTO_MIN_GAP_MS = 2000;
 const DEPOSIT_CONFIRM_TIMEOUT_MS = 90_000;
+// errors worth retrying rather than stopping Tether over
+const TRANSIENT = /fetch failed|failed to fetch|network|timed? ?out|timeout|ECONN|ENOTFOUND|socket|\b(429|5\d\d)\b|busy|temporarily/i;
 const NET_RETRY_MS = 5_000; // safety-net reconcile: soonest after the last attempt
-const NET_REFRESH_MS = 30_000; // …and at least this often even when nothing changed
+const NET_REFRESH_MS = 60_000; // …and at least this often even when nothing changed
 
 export function createHedgeEngine({ publish, exec }) {
   let settings = { ...HEDGE_DEFAULTS };
@@ -118,8 +123,11 @@ export function createHedgeEngine({ publish, exec }) {
       suggestion: rebalanceSuggestion(),
       maxLeverage,
       rounds: rounds.snapshot(),
+      exits: exits.snapshot(),
+      // this coin's papertrade positions, decoded, for the TP/SL editors
+      ptPositions: lastPtFrame && state.hl.account ? safePositions(settings.coin, state.hl.account.mid) : [],
       pageCoin,
-      managing: rounds.managing() || !!tetheredCoin(),
+      managing: rounds.managing() || !!tetheredCoin() || exits.managing(),
       lockedBy: pageCoin && pageCoin !== settings.coin ? (rounds.lockedCoin() ? "round" : tetheredCoin() ? "tether" : null) : null,
       capacityInputs: capacityInputs(),
     };
@@ -251,7 +259,7 @@ export function createHedgeEngine({ publish, exec }) {
     } catch (err) {
       state.hl.status = "down";
       state.hl.error = String(err.message || err);
-      if (state.auto) failAuto(`Hyperliquid read failed (${state.hl.error})`);
+      // Tether pauses (maybeAutoHedge needs both feeds live) and resumes on the next good read
     }
     // re-mark papertrade P&L at the latest mid between stream frames
     if (lastPtFrame && state.hl.account) remarkPt();
@@ -313,9 +321,8 @@ export function createHedgeEngine({ publish, exec }) {
   function remarkPt() {
     try {
       state.pt.summary = summarize(lastPtFrame, settings.coin, state.hl.account.mid, state.winFeeRate ?? 0);
-    } catch (err) {
-      state.pt.summary = null;
-      failAuto(String(err.message || err));
+    } catch {
+      state.pt.summary = null; // a price that can't be read against this mid yet: wait for the next one
     }
   }
 
@@ -334,7 +341,8 @@ export function createHedgeEngine({ publish, exec }) {
     state.pt.status = status;
     state.pt.error = error;
     if (status === "live") tryResumeAuto();
-    if (status === "down" && state.auto) failAuto(`papertrade stream down (${error})`);
+    // a dropped stream reconnects by itself (subscribeAccount); Tether pauses meanwhile and resumes on
+    // the next frame, re-hedging whatever filled in between
     emit();
   }
 
@@ -357,7 +365,17 @@ export function createHedgeEngine({ publish, exec }) {
       setTimeout(maybeAutoHedge, AUTO_MIN_GAP_MS - (now - state.lastOrderAt) + 10);
       return;
     }
-    hedgeNow("auto").catch((err) => failAuto(String(err.message || err)));
+    hedgeNow("auto").catch((err) => {
+      const msg = String(err.message || err);
+      // network trouble: stay on and try again (orders carry a cloid, so a retry can't double up)
+      if (TRANSIENT.test(msg)) {
+        alert("warn", `Hedge order didn't go through (${msg}); retrying`);
+        state.lastOrderAt = Date.now();
+        setTimeout(maybeAutoHedge, AUTO_MIN_GAP_MS + 10);
+        return;
+      }
+      failAuto(msg);
+    });
   }
 
   async function run(label, fn) {
@@ -440,8 +458,9 @@ export function createHedgeEngine({ publish, exec }) {
     });
   }
 
+  // before and after orders: everything fresh, including leverage and available-to-trade
   async function refreshHlQuiet() {
-    state.hl.account = withTotals(await hl.account(settings.hedgeWallet, settings.coin));
+    state.hl.account = withTotals(await hl.account(settings.hedgeWallet, settings.coin, { fresh: true }));
     state.hl.status = "live";
   }
 
@@ -609,6 +628,44 @@ export function createHedgeEngine({ publish, exec }) {
     emit();
   }
 
+  function safePositions(coin, mid) {
+    try {
+      return positionsOf(lastPtFrame, coin, mid);
+    } catch {
+      return []; // a price we can't decode against this mid (mid not loaded yet)
+    }
+  }
+
+  const exits = createExits({
+    positions: (mids) => {
+      if (!lastPtFrame) return [];
+      const known = { ...mids, ...(state.hl.account ? { [settings.coin]: state.hl.account.mid } : {}) };
+      return Object.keys(INSTRUMENT_IDS).flatMap((coin) => (known[coin] ? safePositions(coin, known[coin]) : []));
+    },
+    readableCoins: (mids) => {
+      if (!lastPtFrame) return [];
+      const known = { ...mids, ...(state.hl.account ? { [settings.coin]: state.hl.account.mid } : {}) };
+      return Object.keys(INSTRUMENT_IDS).filter((coin) => known[coin]);
+    },
+    closeQueued: (id) => (lastPtFrame?.operations ?? []).some((op) => op[1] === "closePositions" && (op[9] ?? []).map(String).includes(id)),
+    ptLive: () => state.pt.status === "live" && !!lastPtFrame,
+    subscribeMid: (coin, fn) => (hl ?? createHl()).subscribeMid(coin, fn),
+    exec,
+    alert: (level, text) => alert(level, text),
+    emit: () => emit(),
+  });
+  const exitsReady = exits.init();
+
+  async function setExit(args) {
+    await exitsReady;
+    return exits.set(args);
+  }
+
+  async function armExit(args) {
+    await exitsReady;
+    return exits.arm({ coin: settings.coin, ...args });
+  }
+
   let roundsReady = null;
   const rounds = createRounds({
     hl: () => {
@@ -671,5 +728,5 @@ export function createHedgeEngine({ publish, exec }) {
     return rounds.cancel(r.id);
   }
 
-  return { configure, hedgeNow, setAuto, setLeverage, sendToPapertrade, refreshVault, snapshot, emit, scheduleRound, cancelRound, wakeRounds, setupAgent, exitRound, setSessionWallet, setPageCoin, coin: () => settings.coin };
+  return { setExit, armExit, configure, hedgeNow, setAuto, setLeverage, sendToPapertrade, refreshVault, snapshot, emit, scheduleRound, cancelRound, wakeRounds, setupAgent, exitRound, setSessionWallet, setPageCoin, coin: () => settings.coin };
 }

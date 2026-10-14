@@ -11,7 +11,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RELEASE = process.argv.includes("--release");
 
 // what the unpacked extension needs at runtime — nothing else is shipped
-const RUNTIME_FILES = ["manifest.json", "content.js", "hedge-ui.js", "chart-bridge.js", "hud.css", "options.html", "options.js", "assets"];
+const RUNTIME_FILES = ["manifest.json", "content.js", "hedge-ui.js", "tpsl-ui.js", "chart-bridge.js", "hud.css", "options.html", "options.js", "assets"];
 
 async function bundle(outfile, { dev }) {
   await build({
