@@ -236,6 +236,7 @@
     .pr-picks button.on { border-color: #8b2020; color: #8b2020; background: rgba(139, 32, 32, 0.06); }
     .pr-warn { font-size: 11.5px; color: #8b2020; }
     .pr-warn:empty { display: none; }
+    .pr-fit { margin-top: 8px; padding: 6px 8px; border-radius: 6px; font-size: 12px; line-height: 1.4; color: #8b2020; background: rgba(139, 32, 32, 0.07); }
     .pr-note { font-size: 11.5px; color: rgb(143, 134, 118); }
     .pr-note b { color: #2a2520; font-weight: 600; }
     .pr-pending { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; color: #2f6b3f; }
@@ -291,7 +292,17 @@
   const tOffline = document.createElement("div");
   tOffline.className = "pr-offline";
   tOffline.hidden = true;
-  ticket.append(tHead, tOffline, tBody, tPending);
+  // shown whether or not TP/SL is ticked: a papertrade order Hyperliquid couldn't hedge
+  const tFit = document.createElement("div");
+  tFit.className = "pr-fit";
+  tFit.hidden = true;
+  ticket.append(tHead, tOffline, tBody, tPending, tFit);
+  function renderFit() {
+    const b = ticketBase();
+    const f = b ? eng.fit({ isLong: b.isLong, margin: b.margin, leverage: Math.round((b.size * b.entry) / b.margin) }) : null;
+    tFit.textContent = f && !f.ok ? f.text : "";
+    tFit.hidden = !tFit.textContent;
+  }
   function renderOffline(s) {
     const coin = location.pathname.match(/\/trade\/([a-z]+)/i)?.[1]?.toUpperCase();
     tOffline.textContent = !s
@@ -535,6 +546,7 @@
   setInterval(() => {
     tTp.sync();
     tSl.sync();
+    renderFit();
   }, 500);
   document.addEventListener("input", (e) => {
     if (e.target.id === "im" || e.target.id === "il") {

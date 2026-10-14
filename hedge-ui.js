@@ -45,6 +45,7 @@
           <div class="hx-delta-t"><span class="hx-dtext">—</span><span class="hx-pct">—</span></div>
         </div>
         <div class="hx-plan"></div>
+        <div class="hx-fit warn" hidden></div>
         <div class="hx-fast" data-tip="Papertrade queues opens and closes, sometimes for minutes. Higher-notional orders tend to be filled sooner, so a bigger size usually means less waiting. Size is capped by both venues' balances and your max hedge setting."></div>
         <div class="hx-actions">
           <label class="switch" data-tip="Tether on: Hyperliquid follows papertrade automatically. When a papertrade open or close fills (after papertrade's queue), Hyperliquid opens or closes the opposite side."><input type="checkbox" class="hx-auto" /><span></span><em>Auto-hedge (Tether)</em></label>
@@ -166,7 +167,7 @@
 
   const q = (s) => card.querySelector(s) ?? acctSec.querySelector(s);
   const ui = Object.fromEntries(
-    ["hx-signer", "hx-empty", "hx-main", "hx-pt", "hx-hl", "hx-dtext", "hx-pct", "hx-auto", "hx-ptpnl", "hx-hlpnl", "hx-net-pnl", "hx-bust", "hx-liq", "hx-ptav", "hx-ptq", "hx-hleq", "hx-hlw", "hx-sugg", "hx-amt", "hx-confirm", "hx-confirm-t", "hx-unlock", "hx-pass", "hx-alerts", "hx-levs", "hx-mode", "hx-plan", "hx-netline", "hx-status", "hx-status-t", "hx-xkey", "hx-tether-on", "hx-lanes", "hx-fast"].map((c) => [c, q(`.${c}`)]),
+    ["hx-signer", "hx-empty", "hx-main", "hx-pt", "hx-hl", "hx-dtext", "hx-pct", "hx-auto", "hx-ptpnl", "hx-hlpnl", "hx-net-pnl", "hx-bust", "hx-liq", "hx-ptav", "hx-ptq", "hx-hleq", "hx-hlw", "hx-sugg", "hx-amt", "hx-confirm", "hx-confirm-t", "hx-unlock", "hx-pass", "hx-alerts", "hx-levs", "hx-mode", "hx-plan", "hx-netline", "hx-status", "hx-status-t", "hx-xkey", "hx-tether-on", "hx-lanes", "hx-fast", "hx-fit"].map((c) => [c, q(`.${c}`)]),
   );
   const deltaFill = q(".hx-delta .bar i");
   const hedgeBtn = q('[data-act="hedge"]');
@@ -243,7 +244,34 @@
 
   // shared with tpsl-ui.js (same isolated world): engine snapshots and commands
   const snapListeners = [];
-  window.__wfHedge = { send: (cmd, args) => send(cmd, args), snap: () => snap, onSnap: (fn) => snapListeners.push(fn) };
+  window.__wfHedge = { send: (cmd, args) => send(cmd, args), snap: () => snap, onSnap: (fn) => snapListeners.push(fn), fit: (t) => hedgeFit(t) };
+
+  // Could Hyperliquid carry the hedge for papertrade's ticket, on top of what's already open?
+  // Mirrors the checks hedgeLane runs before each order in src/hedge.js (keep in step): free margin
+  // on that side at the chosen leverage plus a cost buffer, max order and max hedge. Display only:
+  // it warns before the papertrade order instead of after it fills.
+  const HL_COST_FRACTION = 0.001; // src/hedge.js
+  function hedgeFit(t) {
+    const h = snap?.hl.account;
+    const pt = snap?.pt.summary;
+    if (!t || !h || !pt || !(h.mid > 0)) return null;
+    const lev = snap.settings.hlLeverage;
+    const coin = snap.settings.coin;
+    const ptAdd = ((t.isLong ? 1 : -1) * t.margin * t.leverage) / h.mid;
+    const target = -(pt.netSize + ptAdd);
+    const delta = target - h.size;
+    const flipping = h.size !== 0 && Math.sign(delta) !== Math.sign(h.size);
+    const addingUsd = (flipping ? Math.max(0, Math.abs(delta) - Math.abs(h.size)) : Math.abs(delta)) * h.mid;
+    const free = h.availableToTrade[delta > 0 ? 0 : 1];
+    const perUsd = 1 / lev + HL_COST_FRACTION;
+    const what = pt.netSize === 0 ? "this trade" : `another ${usdK(t.margin * t.leverage)} ${t.isLong ? "long" : "short"}`;
+    if (Math.abs(delta) * h.mid > snap.settings.maxOrderUsd) return { ok: false, text: `Hyperliquid won't hedge ${what}: the ${usdK(Math.abs(delta) * h.mid)} hedge order is over your ${usdK(snap.settings.maxOrderUsd)} max order (settings).` };
+    if (Math.abs(target) * h.mid > snap.settings.maxPositionUsd) return { ok: false, text: `Hyperliquid won't hedge ${what}: a ${usdK(Math.abs(target) * h.mid)} hedge is over your ${usdK(snap.settings.maxPositionUsd)} max hedge (settings).` };
+    if (addingUsd > free / perUsd + 1) {
+      return { ok: false, text: `Hyperliquid can't hedge ${what}: it needs ${usd(addingUsd * perUsd, 0)} margin at ${lev}x and ${usd(free, 0)} is free. Raise Hyperliquid leverage or move USDC there.` };
+    }
+    return { ok: true, coin };
+  }
 
   function send(cmd, args) {
     return new Promise((resolve, reject) => {
@@ -494,6 +522,9 @@
 
   // What the hedge will be: from the open papertrade position, or from the ticket before opening
   function renderPlan() {
+    const fit = hedgeFit(readTicket());
+    ui["hx-fit"].textContent = fit && !fit.ok ? fit.text : "";
+    ui["hx-fit"].hidden = !ui["hx-fit"].textContent;
     const pt = snap.pt.summary;
     const h = snap.hl.account;
     const coin = snap.settings.coin;

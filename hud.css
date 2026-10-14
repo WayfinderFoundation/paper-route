@@ -335,11 +335,11 @@ section.collapsed { padding-bottom: 0; }
 .sc-pct { width: 64px; flex: none; }
 .sc-row .seg { flex-wrap: wrap; }
 /* status sentences stay muted; a 6px dot carries the tone, like simple mode's status rows */
-.hx-netline, .hx-status-t { position: relative; padding-left: 14px; font-size: 12px; line-height: 16px; color: var(--muted); }
+.hx-netline, .hx-status-t, .hx-fit { position: relative; padding-left: 14px; font-size: 12px; line-height: 16px; color: var(--muted); }
 .hx-netline:empty { display: none; }
-.hx-netline::before, .hx-status-t::before { content: ""; position: absolute; left: 0; top: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--surface-3); }
+.hx-netline::before, .hx-status-t::before, .hx-fit::before { content: ""; position: absolute; left: 0; top: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--surface-3); }
 .hx-netline.up::before, .hx-status-t.up::before { background: var(--primary); }
-.hx-netline.warn::before, .hx-status-t.warn::before { background: var(--amber); }
+.hx-netline.warn::before, .hx-status-t.warn::before, .hx-fit.warn::before { background: var(--amber); }
 .hx-netline.dn::before, .hx-status-t.dn::before { background: var(--down); }
 
 /* ---------- tooltips ---------- */
@@ -486,3 +486,4 @@ button[data-tip], label[data-tip], input[data-tip] { cursor: pointer; }
 .hx-lane-s.warn::before { background: var(--amber); }
 .hx-lane-s.up, .hx-lane-s.warn { color: var(--fg); }
 .hx-lane-legs { margin-left: auto; font-variant-numeric: tabular-nums; }
+.hx-fit { color: var(--fg); }
