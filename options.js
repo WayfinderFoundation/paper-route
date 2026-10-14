@@ -6,8 +6,8 @@ function show(text, ok) {
 }
 
 document.getElementById("reset").addEventListener("click", async () => {
-  await chrome.storage.local.remove(["hudPos", "hudCollapsed", "overlayEnabled"]);
-  show("HUD position reset — reload papertrade", true);
+  await chrome.storage.local.remove(["hudPos", "hudCollapsed", "overlayEnabled", "flowOpen"]);
+  show("Panel position and layout reset. Reload papertrade to see it.", true);
 });
 
 // ---------- hedge ----------
@@ -46,7 +46,7 @@ $id("saveHedge").addEventListener("click", async () => {
   // keep fields set elsewhere (the hedge wallet comes from Connect, HL leverage from the HUD)
   const { hedgeSettings: prev } = await chrome.storage.local.get("hedgeSettings");
   await chrome.storage.local.set({ hedgeSettings: { ...prev, ...s } });
-  showKey("Hedge settings saved", true);
+  show("Settings saved", true);
 });
 
 const fmtDate = (ms) => new Date(ms).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
@@ -130,3 +130,109 @@ $id("disconnect").addEventListener("click", async () => {
   }
   refreshStatus();
 });
+
+// ---------- tooltips ----------
+// Labels with data-tip show their explanation in one floating bubble on hover or keyboard focus.
+const tip = document.querySelector(".tip");
+function showTip(target) {
+  tip.textContent = target.dataset.tip;
+  tip.classList.add("on");
+  const r = target.getBoundingClientRect();
+  const t = tip.getBoundingClientRect();
+  const left = Math.max(8, Math.min(window.innerWidth - t.width - 8, r.left));
+  const above = r.top - t.height - 8;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${above >= 8 ? above : r.bottom + 8}px`;
+}
+const hideTip = () => tip.classList.remove("on");
+for (const type of ["pointerover", "focusin"]) {
+  document.addEventListener(type, (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (t) showTip(t);
+    else hideTip();
+  });
+}
+window.addEventListener("scroll", hideTip, true);
+
+// ---------- dropdowns ----------
+// Chrome draws a <select>'s option list in OS colours, so each select[data-dd] gets a styled
+// trigger + menu. The select stays the source of truth: code reads its .value and hears "change".
+const CHEVRON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>';
+const CHECK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>';
+
+function dropdown(select) {
+  const wrap = document.createElement("div");
+  wrap.className = "dd";
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "dd-trigger";
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-expanded", "false");
+  const menu = document.createElement("ul");
+  menu.className = "dd-menu";
+  menu.setAttribute("role", "listbox");
+  const items = [...select.options].map((o) => {
+    const li = document.createElement("li");
+    li.setAttribute("role", "option");
+    li.dataset.value = o.value;
+    const text = document.createElement("span");
+    text.textContent = o.textContent;
+    if (o.dataset.sub) {
+      const sub = document.createElement("small");
+      sub.textContent = o.dataset.sub;
+      text.append(sub);
+    }
+    li.append(text);
+    li.insertAdjacentHTML("beforeend", CHECK);
+    menu.append(li);
+    return li;
+  });
+  wrap.append(trigger, menu);
+  select.after(wrap);
+
+  let active = -1;
+  const sync = () => {
+    const label = document.createElement("span");
+    label.textContent = select.selectedOptions[0]?.textContent ?? "";
+    trigger.replaceChildren(label);
+    trigger.insertAdjacentHTML("beforeend", CHEVRON);
+    for (const li of items) li.setAttribute("aria-selected", String(li.dataset.value === select.value));
+  };
+  const setActive = (i) => {
+    active = (i + items.length) % items.length;
+    items.forEach((li, j) => li.classList.toggle("active", j === active));
+  };
+  const open = (on) => {
+    menu.classList.toggle("open", on);
+    trigger.setAttribute("aria-expanded", String(on));
+    if (on) setActive(Math.max(0, select.selectedIndex));
+  };
+  const choose = (value) => {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    open(false);
+    trigger.focus();
+  };
+  trigger.addEventListener("click", () => open(!menu.classList.contains("open")));
+  trigger.addEventListener("keydown", (e) => {
+    const isOpen = menu.classList.contains("open");
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!isOpen) open(true);
+      else setActive(active + (e.key === "ArrowDown" ? 1 : -1));
+    } else if ((e.key === "Enter" || e.key === " ") && isOpen) {
+      e.preventDefault();
+      choose(items[active].dataset.value);
+    } else if (e.key === "Escape") open(false);
+  });
+  menu.addEventListener("click", (e) => {
+    const li = e.target.closest("li");
+    if (li) choose(li.dataset.value);
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (!wrap.contains(e.target)) open(false);
+  });
+  select.addEventListener("change", sync);
+  sync();
+}
+document.querySelectorAll("select[data-dd]").forEach(dropdown);
