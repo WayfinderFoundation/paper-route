@@ -117,7 +117,7 @@
         ? ""
         : side === "sl"
           ? "Where to close both legs at a papertrade loss: that loss mints PAPER while Hyperliquid's opposite side wins it back. At bust lets papertrade liquidate, which mints on the full margin."
-          : "Optional: close both legs if papertrade moves into profit instead. A winning close earns no PAPER; while hedged, the pair stays neutral if you wait.";
+          : "Close both legs if papertrade moves into profit instead. A winning close earns no PAPER; while hedged, the pair stays neutral if you wait.";
       price.placeholder = paper ? "Price" : side === "tp" ? "TP price" : "SL price";
       clear.textContent = L[`${side}Off`];
       clear.title = !paper

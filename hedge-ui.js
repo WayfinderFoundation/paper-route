@@ -53,7 +53,7 @@
         </div>
         <button class="pbtn primary hx-hedge" data-act="hedge" hidden data-tip="One-off, for when Tether is off: trade Hyperliquid once so it exactly offsets your open papertrade position. You confirm the size and fees first.">Hedge now</button>
         <div class="hx-grid">
-          <span class="lbl" data-tip="Papertrade profit or loss if you closed now. In this play you want it negative: papertrade losses earn Paper, and the Hyperliquid hedge makes them back.">Paper P&amp;L</span><span class="hx-ptpnl">—</span>
+          <span class="lbl" data-tip="Papertrade profit or loss if you closed now. When hedged, a papertrade loss earns Paper while the Hyperliquid hedge makes it back.">Paper P&amp;L</span><span class="hx-ptpnl">—</span>
           <span class="lbl" data-tip="Hyperliquid profit or loss on the hedge, including funding paid or received">HL P&amp;L</span><span class="hx-hlpnl">—</span>
           <span class="lbl" data-tip="Both legs together. When fully hedged this stays near zero apart from fees, funding and papertrade's win fee.">Net</span><span class="hx-net-pnl">—</span>
           <span class="lbl" data-tip="Price at which papertrade liquidates your position (you lose that margin), and how far away it is">Paper bust</span><span class="hx-bust">—</span>
@@ -94,16 +94,6 @@
   card.after(acctSec);
   chrome.storage.local.get("acctsOpen").then(({ acctsOpen }) => acctSec.classList.toggle("collapsed", !acctsOpen));
 
-  // ---------- how you earn Paper: the two legs, above all the sections ----------
-  const play = el("div", "play");
-  play.innerHTML = `
-    <span class="lbl" data-tip="Papertrade pays out Paper on losses. Paper Route holds the opposite position on Hyperliquid, so as your papertrade position loses, the Hyperliquid one gains about the same: you collect Paper while your dollars stay roughly where they were.">How you earn Paper</span>
-    <div class="play-legs">
-      <span>Papertrade</span><em>meant to lose</em><b>earns Paper</b>
-      <span>Hyperliquid</span><em>the opposite side</em><b>wins it back</b>
-    </div>
-    <p>You only place orders on papertrade. Paper Route hedges it on Hyperliquid.</p>`;
-  hud.flow.before(play);
 
   // ---------- Hyperliquid positions, inside "Accounts & transfers" ----------
   const acct = el("div", "hlacct");
@@ -449,7 +439,7 @@
     renderPlan();
 
     const net = pt.uPnlAfterFee + h.uPnl + h.funding;
-    // a papertrade loss is the point of the play (it earns Paper), so it isn't shown as bad news
+    // a hedged papertrade loss earns Paper, so it isn't shown as bad news
     setNum(ui["hx-ptpnl"], pt.uPnlAfterFee, pt.uPnlAfterFee < 0 ? " · earns Paper" : "");
     ui["hx-ptpnl"].className = `hx-ptpnl ${pt.uPnlAfterFee < 0 ? "up" : ""}`;
     setNum(ui["hx-hlpnl"], h.uPnl + h.funding, h.funding ? ` incl. ${signed(h.funding)} funding` : "");

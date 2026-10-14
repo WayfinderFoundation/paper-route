@@ -106,8 +106,8 @@
         </div>
       </div>
       <section class="flow collapsed">
-        <div class="sec-h" data-act="toggle"><span class="cap" data-tip="What it's for: picking a papertrade side that's likelier to lose. You earn Paper by losing on papertrade while the Hyperliquid hedge makes it back, so you want papertrade on the wrong side of the next move. This reads Hyperliquid's order book and trades for which way price leans over the next 10 to 60 seconds. It's a short-term tilt only: it says nothing beyond about a minute.">${ICON_CHEVRON}Order flow</span><span class="cap-r fx-lead" data-tip="Which way the order flow leans right now, for the next 10 to 60 seconds">—</span></div>
-        <div class="fx-lean" data-tip="Price leaning up favours a papertrade short: it's likelier to lose (earning Paper) while its Hyperliquid long gains. Leaning down favours a papertrade long. A short-term tilt only, so it helps most when your papertrade order fills quickly.">
+        <div class="sec-h" data-act="toggle"><span class="cap" data-tip="What it's for: timing a short-term entry. It reads Hyperliquid's order book and trades for which way price leans over the next 10 to 60 seconds. With Tether on, it also names the papertrade side that's likelier to lose, since a hedged papertrade loss earns Paper. It's a short-term tilt only: it says nothing beyond about a minute.">${ICON_CHEVRON}Order flow</span><span class="cap-r fx-lead" data-tip="Which way the order flow leans right now, for the next 10 to 60 seconds">—</span></div>
+        <div class="fx-lean" data-tip="Which way Hyperliquid's price leans for the next 10 to 60 seconds. With Tether on, leaning up favours a papertrade short (likelier to lose, earning Paper, while its Hyperliquid hedge gains) and leaning down a papertrade long. A short-term tilt only, so it helps most when your papertrade order fills quickly.">
           <span class="fx-lean-v">—</span>
           <span class="fx-lean-t">—</span>
         </div>
@@ -277,19 +277,16 @@
     }
     const s = idx.score;
     const leadH = idx.horizons.find((h) => h.s === idx.lead);
-    // The play is to lose on papertrade (which earns Paper) while Hyperliquid wins, so the
-    // papertrade side to pick is the one against the lean: price leaning up → papertrade short.
+    // Plain price direction. With Tether on (hedged on Hyperliquid) a papertrade loss earns Paper
+    // while the hedge wins it back, so it also names the papertrade side against the lean.
     const up = Math.abs(s) < LEAN_AT ? null : s > 0;
-    const ptSide = up === null ? null : up ? "short" : "long";
-    // coloured like papertrade's own buttons: short red, long green
-    const sideTone = ptSide === "long" ? "up" : ptSide === "short" ? "dn" : "";
-    els.lead.textContent = ptSide ? `Favours papertrade ${ptSide}` : "No clear pick";
-    els.lead.className = `cap-r fx-lead ${sideTone}`;
-    els.leanV.textContent = ptSide ? `Papertrade ${ptSide}` : "No clear pick";
-    els.leanV.className = `fx-lean-v ${sideTone}`;
-    els.leanT.textContent = up === null
-      ? `Price isn't leaning either way${f.provisional ? " · provisional" : ""}`
-      : `Price leans ${up ? "up" : "down"}, next 10–60s${f.provisional ? " · provisional" : ""}`;
+    const tone = up === null ? "" : up ? "up" : "dn";
+    const hedged = !!window.__wfHedge?.snap()?.auto;
+    els.lead.textContent = up === null ? "No clear lean" : `Leans ${up ? "up" : "down"}`;
+    els.lead.className = `cap-r fx-lead ${tone}`;
+    els.leanV.textContent = up === null ? "No clear lean" : `Leans ${up ? "up" : "down"}`;
+    els.leanV.className = `fx-lean-v ${tone}`;
+    els.leanT.textContent = `${up === null ? "Too weak to call" : "Next 10–60s"}${up !== null && hedged ? ` · hedged: favours papertrade ${up ? "short" : "long"}` : ""}${f.provisional ? " · provisional" : ""}`;
     els.leanT.dataset.tip = leadH?.ic != null ? `IC ${leadH.ic.toFixed(2)} at ${idx.lead}s: how well this read has matched the next moves historically (0 = no skill, 1 = perfect)` : "";
     els.score.textContent = `${s >= 0 ? "+" : "−"}${Math.abs(s).toFixed(0)}`;
     els.score.className = `fx-score ${Math.abs(s) < LEAN_AT ? "" : s > 0 ? "up" : "dn"}`;

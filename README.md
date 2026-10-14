@@ -2,30 +2,18 @@
 
 <h1 align="center">Paper Route</h1>
 
-<p align="center">Delta-neutral hedging for <a href="https://exchange.papertrade.xyz">papertrade</a> on <a href="https://app.hyperliquid.xyz">Hyperliquid</a>, in a Chrome extension. By <a href="https://wayfinder.ai">Wayfinder</a>.</p>
+<p align="center">Stop loss, take profit and Hyperliquid hedging for <a href="https://exchange.papertrade.xyz">papertrade</a>, in a Chrome extension. By <a href="https://wayfinder.ai">Wayfinder</a>.</p>
 
-- **Tether**: holds the opposite position on Hyperliquid for exactly as long as your papertrade position exists.
-  It follows papertrade's *fills*, not your clicks, so queued orders never leave you one-sided.
-- **Safety net**: if papertrade liquidates you while your browser is closed, Hyperliquid closes the hedge at the
-  same price.
 - **Stop loss and take profit** on papertrade, which has neither: set them in the order form or on any open
-  position, by price, % return or $.
+  position, by price, % return or $. Paper Route watches the price and closes the position for you.
+- **Tether**: holds the opposite position on Hyperliquid for exactly as long as your papertrade position exists.
+  It shines with large positions riding big moves (see [Where Tether shines](#where-tether-shines)). It follows
+  papertrade's *fills*, not your clicks, so queued orders never leave you one-sided.
+- **Safety net**: if papertrade liquidates a hedged position while your browser is closed, Hyperliquid closes the
+  hedge at the same price.
 - **Order-flow overlay**: a live read of Hyperliquid's order book and trades, drawn on papertrade's chart.
 
 BTC and ETH. Everything runs in your browser; there's no Paper Route server.
-
-## The play
-
-Papertrade pays out **Paper** when you lose. Paper Route holds the opposite position on Hyperliquid, so as your
-papertrade position loses, the Hyperliquid one gains about the same: you collect Paper while your dollars stay
-roughly where they were.
-
-1. Place trades on **papertrade's own order ticket**, as usual.
-2. With **Tether** on, Paper Route opens the opposite side on Hyperliquid as each papertrade order fills, and closes
-   it when the papertrade position closes.
-3. To pick a side, use the HUD's **Order flow**. You want papertrade to lose, so when Hyperliquid's price leans up
-   it favours a **papertrade short** (red), and when it leans down a **papertrade long** (green). It's a 10–60 second
-   tilt, so it matters most when your order fills quickly, and larger papertrade orders tend to fill faster.
 
 > Papertrade and Hyperliquid are separate venues with real money on both. Nothing here is financial advice.
 > Read [Risks](#risks) before you turn anything on.
@@ -113,6 +101,22 @@ Don't load two versions at once.
 
 ### Tether
 
+#### Where Tether shines
+
+Every hedge is a Hyperliquid market order on the way in and again on the way out, each paying Hyperliquid's taker
+fee and the builder fee. That's worth it when the position is **large** and the move is **big**: then the hedge
+does real work. On small positions or quick in-and-out trades, the fees may offset any gains.
+
+#### Earning Paper with a hedge
+
+Papertrade pays out **Paper** when you lose: a losing close or a liquidation mints it (a liquidation on the full
+margin). With Tether holding the opposite position on Hyperliquid, a papertrade loss is matched by a Hyperliquid
+gain of about the same size, so you collect Paper while your dollars stay roughly where they were, before fees.
+With Tether on, the stop loss / take profit fields are set up for this (see below), and the HUD's Order flow
+points to the papertrade side that's likelier to lose.
+
+#### How it follows papertrade
+
 Papertrade takes a fee on winning trades and none on losses, so the leg you hold there is the one you'd rather
 lose with. Paper Route holds the opposite position on Hyperliquid, so the pair is market-neutral. Papertrade
 **queues** opens and closes, sometimes for minutes, so the hedge reacts to papertrade **fills**, never to clicks:
@@ -136,11 +140,11 @@ under 1 bp) and, when a level is hit, clicks papertrade's own Close button, foll
 Tether on, the Hyperliquid hedge closes when that close fills. A level is a trigger, not a price guarantee, and it
 only works while Chrome is open with Paper Route enabled (see [Keep it running](#keep-it-running)).
 
-**With Tether on, the exits are set up for [the play](#the-play).** The papertrade leg is meant to lose, since
+**With Tether on, the exits are set up for [earning Paper with a hedge](#earning-paper-with-a-hedge).** The papertrade leg is meant to lose, since
 losing closes and liquidations mint PAPER (a liquidation on the full margin), so the form and editor show a
 **Tether on** pill and relabel the two sides:
 
-- **Win exit (TP)** (the take-profit side): an optional early exit, off by default. A winning close earns
+- **Win exit (TP)** (the take-profit side): an early exit, off by default. A winning close earns
   no PAPER, and while hedged the pair stays neutral if you wait.
 - **Bank Paper at (SL)** (the stop-loss side): close both legs once papertrade is down 25 / 50 / 75 % of
   margin, or **At bust** (the default) to let papertrade liquidate while the [safety net](#safety-net) closes
@@ -173,8 +177,9 @@ papertrade's bust. One click sends USDC from Hyperliquid to your papertrade depo
 A panel and chart layer built only from Hyperliquid's public websocket (order book, trades, open interest,
 funding): the components (microprice, book imbalance, order-flow imbalance, taker flow, momentum, open-interest
 change, mark vs mid), a volatility regime, and a combined **order-flow index** with its expected move over the
-next 10–60 s drawn on the chart. The HUD turns that lean into a papertrade side (see [The play](#the-play)). See
-[Does it work?](#does-it-work) for how much that's worth. The chart also shows
+next 10–60 s drawn on the chart. The HUD says which way price leans for the next 10–60 s; with Tether on it also
+names the papertrade side that's likelier to lose (see [Earning Paper with a hedge](#earning-paper-with-a-hedge)).
+See [Does it work?](#does-it-work) for how much that's worth. The chart also shows
 papertrade's bust price and Hyperliquid's liquidation price.
 
 ### Fees

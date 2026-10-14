@@ -405,14 +405,6 @@ button[data-tip], label[data-tip], input[data-tip] { cursor: pointer; }
 .fx-lean-v.up { color: var(--up); }
 .fx-lean-v.dn { color: var(--down); }
 
-/* ---------- how you earn Paper: the two legs, as label / value rows ---------- */
-.play { display: flex; flex-direction: column; gap: 8px; margin: 0 12px 12px; padding: 12px; border-radius: 14px; background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line); }
-.play > .lbl { align-self: flex-start; font-size: 12px; font-weight: 500; }
-.play-legs { display: grid; grid-template-columns: auto 1fr auto; column-gap: 10px; row-gap: 4px; align-items: baseline; font-size: 12px; line-height: 16px; }
-.play-legs span { font-weight: 500; color: var(--fg); }
-.play-legs em { font-style: normal; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.play-legs b { font-weight: 500; color: var(--fg); text-align: right; white-space: nowrap; }
-.play p { margin: 0; padding-top: 8px; font-size: 12px; line-height: 16px; color: var(--muted); box-shadow: inset 0 1px 0 var(--line); }
 
 /* ---------- accounts & transfers section ---------- */
 .accts .hx-accts-b { padding: 0; }
