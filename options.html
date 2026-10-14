@@ -4,196 +4,177 @@
   <meta charset="utf-8" />
   <title>Paper Route</title>
   <style>
-    /* Same tokens as hud.css (Wayfinder simple mode). */
-    @font-face { font-family: "GeneralSans"; src: url("assets/GeneralSans-Variable.woff2") format("woff2"); font-weight: 200 700; }
+    /* Wayfinder app tokens (wayfinder.ai): teal-black surfaces, hairline rings, mint primary, 44px controls */
     :root {
-      --bg: #0d0d0f; --panel: #1c1d1f; --menu: #212125; --raised: #27292c;
-      --fg: #f1f2f4; --muted: #9b9fa5; --faint: rgba(155, 159, 165, 0.7);
-      --accent: #09c15a; --up: #56d57b; --down: #f14d4c;
-      --amber: #fde68a; --amber-bg: rgba(251, 191, 36, 0.1); --amber-line: rgba(251, 191, 36, 0.3);
-      --signal: #8bd6fa;
-      --surface-1: rgba(255, 255, 255, 0.04); --surface-2: rgba(255, 255, 255, 0.06); --surface-3: rgba(255, 255, 255, 0.08); --surface-4: rgba(255, 255, 255, 0.1);
-      --line: rgba(255, 255, 255, 0.05); --line-2: rgba(255, 255, 255, 0.09); --line-3: rgba(255, 255, 255, 0.13);
-      --ring: rgba(9, 193, 90, 0.6);
+      --bg: oklch(10% 0.01 200);
+      --card: oklch(15.5% 0.013 200);
+      --fg: oklch(96.5% 0.005 180);
+      --muted: oklch(68% 0.018 180);
+      --border: oklch(100% 0 0 / 0.09);
+      --input: oklch(100% 0 0 / 0.12);
+      --primary: oklch(88% 0.17 140);
+      --primary-fg: oklch(13% 0.012 200);
+      --primary-soft: oklch(88% 0.17 140 / 0.12);
+      --amber: oklch(82% 0.14 75);
+      --amber-soft: oklch(82% 0.14 75 / 0.12);
+      --down: oklch(70% 0.17 25);
+      --ring: oklch(88% 0.17 140 / 0.55);
+      --shadow-card: 0 0 0 1px oklch(100% 0 0 / 0.04), 0 1px 2px -1px oklch(0% 0 0 / 0.4), 0 16px 40px -24px oklch(0% 0 0 / 0.75);
+      --r: 10.5px;
+      --h: 44px;
       --ease: cubic-bezier(0.2, 0, 0, 1);
-      --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-heading: "GeneralSans", ui-sans-serif, system-ui, sans-serif;
-      color-scheme: dark;
+      --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+      --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; } /* layout rules below set display, which would beat the hidden attribute */
     body {
-      margin: 0; width: 440px; padding: 12px; display: flex; flex-direction: column; gap: 12px;
-      font: 400 14px/20px var(--font); letter-spacing: -0.005em; font-feature-settings: "ss01", "cv11";
-      -webkit-font-smoothing: antialiased; color: var(--fg); background: var(--bg);
+      margin: 0 auto; max-width: 480px; min-width: 380px; padding: 20px 16px 28px;
+      display: flex; flex-direction: column; gap: 14px;
+      font: 400 14px/1.5 var(--sans); letter-spacing: -0.005em; color: var(--fg); background: var(--bg);
+      -webkit-font-smoothing: antialiased;
     }
-    :focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
-    header { display: flex; align-items: center; gap: 10px; padding: 4px 4px 0; }
-    header img { width: 32px; height: 32px; border-radius: 10.5px; }
-    header b { display: block; font: 600 16px/22px var(--font-heading); }
-    header span { color: var(--muted); font-size: 12px; line-height: 16px; }
-    .panel { background: var(--panel); border-radius: 19.6px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
-    .panel-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; height: 44px; padding: 0 16px; box-shadow: inset 0 -1px 0 var(--line); }
-    .panel-h .title { font: 600 14px/20px var(--font-heading); }
-    .status { font-size: 12px; color: var(--muted); }
-    .panel-b { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    header { display: flex; align-items: center; gap: 12px; padding: 0 2px 4px; }
+    header img { width: 36px; height: 36px; border-radius: 9px; }
+    header b { display: block; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+    header span { color: var(--muted); font-size: 12px; }
+
+    .card { background: var(--card); border-radius: 14px; box-shadow: var(--shadow-card); }
+    .card-h { display: flex; align-items: center; gap: 10px; padding: 14px 16px; }
+    .step { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; flex: none; font-size: 12px; font-weight: 600; color: var(--muted); box-shadow: inset 0 0 0 1px var(--input); }
+    .step.done { background: var(--primary); color: var(--primary-fg); box-shadow: none; }
+    .card-h h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; flex: 1; }
+    .pill { font-size: 12px; font-weight: 500; padding: 2px 9px; border-radius: 999px; color: var(--muted); background: oklch(100% 0 0 / 0.06); white-space: nowrap; }
+    .pill.ok { color: var(--primary); background: var(--primary-soft); }
+    .pill.warn { color: var(--amber); background: var(--amber-soft); }
+    .card-b { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 14px; }
+    .lead { margin: 0; color: var(--muted); font-size: 13px; }
+    .lead b { color: var(--fg); font-weight: 500; }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field > span { font-size: 12px; color: var(--muted); }
+    .field small { font-size: 12px; color: var(--muted); opacity: 0.85; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    label, .label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); }
-    input {
-      width: 100%; height: 40px; padding: 0 12px; border: 0; border-radius: 14px; outline: none;
-      background: var(--surface-1); color: var(--fg); font: 400 14px var(--font);
-      box-shadow: inset 0 0 0 1px var(--line-2); transition: box-shadow 150ms ease-out;
+    .grid .wide { grid-column: 1 / -1; }
+    input, select {
+      width: 100%; height: var(--h); padding: 0 12px; border: 0; border-radius: var(--r); outline: none;
+      background: transparent; color: var(--fg); font: 400 14px var(--sans);
+      box-shadow: inset 0 0 0 1px var(--input); transition: box-shadow 150ms var(--ease);
     }
-    input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-    input::placeholder { color: var(--faint); }
-    input:focus { box-shadow: inset 0 0 0 2px var(--ring); }
+    input.mono { font-family: var(--mono); font-size: 13px; }
+    input::placeholder { color: var(--muted); opacity: 0.7; }
+    input:focus, select:focus { box-shadow: inset 0 0 0 1px var(--ring), 0 0 0 3px oklch(88% 0.17 140 / 0.12); }
+    select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 17px) 20px, calc(100% - 12px) 20px; background-size: 5px 5px; background-repeat: no-repeat; }
+    select option { background: var(--card); }
 
-    /* tooltips: dotted-underline label, shared floating popup */
-    .has-tip { cursor: help; text-decoration: underline dotted var(--line-3); text-underline-offset: 4px; align-self: flex-start; border-radius: 4px; transition: text-decoration-color 150ms ease-out; }
-    .has-tip:hover, .has-tip:focus-visible { text-decoration-color: var(--muted); }
-    .tooltip {
-      position: fixed; left: 0; top: 0; z-index: 10; max-width: 280px; padding: 8px 12px; border-radius: 10.5px;
-      font: 400 12px/16px var(--font); color: var(--fg); background: var(--menu);
-      box-shadow: inset 0 0 0 1px rgba(155, 159, 165, 0.12), 0 10px 24px -6px rgba(0, 0, 0, 0.6);
-      pointer-events: none; opacity: 0; transform: translateY(2px); transition: opacity 150ms var(--ease), transform 150ms var(--ease);
+    button {
+      height: var(--h); padding: 0 16px; border: 0; border-radius: var(--r); cursor: pointer;
+      font: 500 14px var(--sans); color: var(--fg); background: oklch(100% 0 0 / 0.08);
+      transition: background-color 150ms var(--ease), filter 150ms var(--ease), scale 150ms var(--ease);
     }
-    .tooltip.on { opacity: 1; transform: none; transition-delay: 250ms; }
+    button:hover { background: oklch(100% 0 0 / 0.12); }
+    button:active { scale: 0.98; }
+    button:disabled { opacity: 0.5; cursor: default; scale: 1; }
+    button.primary { background: var(--primary); color: var(--primary-fg); }
+    button.primary:hover { filter: brightness(1.05); background: var(--primary); }
+    button.ghost { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--border); }
+    button.ghost:hover { color: var(--fg); background: oklch(100% 0 0 / 0.04); }
+    button.danger { background: transparent; color: var(--down); box-shadow: inset 0 0 0 1px oklch(70% 0.17 25 / 0.3); }
+    .actions { display: flex; gap: 8px; }
+    .actions > button { flex: 1; }
 
-    /* dropdown: pill trigger + menu (replaces the OS-styled <select> popup) */
-    select.native { display: none; }
-    .dd { position: relative; }
-    .dd-trigger {
-      all: unset; box-sizing: border-box; width: 100%; height: 40px; padding: 0 12px 0 14px; border-radius: 14px; cursor: pointer;
-      display: flex; align-items: center; justify-content: space-between; gap: 8px;
-      font: 500 14px var(--font); color: var(--fg); background: var(--surface-2);
-      transition: background-color 150ms ease-out, scale 150ms ease-out;
-    }
-    .dd-trigger:hover, .dd-trigger[aria-expanded="true"] { background: var(--surface-3); }
-    .dd-trigger:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
-    .dd-trigger svg { width: 14px; height: 14px; color: var(--muted); transition: transform 150ms ease-out; flex: none; }
-    .dd-trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
-    .dd-menu {
-      position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 5; margin: 0; padding: 6px; list-style: none;
-      display: flex; flex-direction: column; gap: 2px; border-radius: 14px; background: var(--menu);
-      border: 1px solid rgba(155, 159, 165, 0.08); box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
-      transform-origin: top; transition: opacity 150ms var(--ease), transform 150ms var(--ease);
-    }
-    .dd-menu:not(.open) { opacity: 0; transform: translateY(-4px) scale(0.98); pointer-events: none; }
-    .dd-menu li {
-      display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 6px;
-      font: 500 14px/20px var(--font); color: var(--fg); cursor: pointer;
-    }
-    .dd-menu li small { display: block; font-size: 12px; line-height: 16px; font-weight: 400; color: var(--muted); }
-    .dd-menu li:hover, .dd-menu li.active { background: var(--surface-2); }
-    .dd-menu li svg { width: 14px; height: 14px; color: var(--accent); flex: none; visibility: hidden; }
-    .dd-menu li[aria-selected="true"] svg { visibility: visible; }
-
-    .check { flex-direction: row; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 20px; font-weight: 400; color: var(--fg); cursor: pointer; }
-    .check input { appearance: none; flex: none; width: 20px; height: 20px; margin: 0; padding: 0; border-radius: 5px; cursor: pointer; background: transparent; box-shadow: inset 0 0 0 1px var(--line-3); transition: background-color 150ms ease-out, box-shadow 150ms ease-out; }
-    .check input:checked { background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230d0d0f' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E") center / 12px no-repeat; box-shadow: none; }
-    .check small { display: block; font-size: 12px; line-height: 16px; color: var(--muted); }
-    .hint { font-size: 12px; line-height: 16px; color: var(--muted); margin: 0; }
-    .row { display: flex; gap: 8px; }
-    button.b {
-      flex: 1; height: 36px; padding: 0 14px; border: 0; border-radius: 14px; cursor: pointer;
-      font: 600 14px var(--font); color: var(--fg); background: var(--raised);
-      transition: background-color 150ms ease-out, filter 150ms ease-out, scale 150ms ease-out, box-shadow 150ms ease-out;
-    }
-    button.b:hover { background: #303236; }
-    button.b:active { scale: 0.96; }
-    button.b:focus-visible { box-shadow: 0 0 0 3px rgba(9, 193, 90, 0.275); }
-    button.b.primary { background: var(--accent); box-shadow: 0 8px 24px -8px rgba(9, 193, 90, 0.45); }
-    button.b.primary:hover { filter: brightness(1.1); }
-    button.b.ghost { background: transparent; color: var(--muted); }
-    button.b.ghost:hover { background: var(--surface-2); color: var(--fg); }
-    .result { font-size: 12px; line-height: 16px; min-height: 16px; font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
+    .note { padding: 10px 12px; border-radius: var(--r); font-size: 12px; color: var(--amber); background: var(--amber-soft); }
+    .result { font-size: 13px; }
     .result:empty { display: none; }
-    .ok { color: var(--up); } .bad { color: var(--down); }
-    .note { padding: 10px 12px; border-radius: 14px; font-size: 12px; line-height: 16px; color: var(--amber); background: var(--amber-bg); box-shadow: inset 0 0 0 1px var(--amber-line); }
-    .note b { font-weight: 600; }
-    .secure { display: flex; gap: 10px; padding: 12px; border-radius: 14px; background: var(--surface-1); font-size: 12px; line-height: 16px; color: var(--muted); }
-    .secure svg { width: 16px; height: 16px; flex: none; margin-top: 1px; color: var(--up); }
-    .secure b { color: var(--fg); font-weight: 500; }
-    .secure p { margin: 0 0 6px; } .secure p:last-child { margin: 0; }
-    .divider { height: 1px; background: var(--line); margin: 0 -16px; }
+    .result.ok { color: var(--primary); }
+    .result.bad { color: var(--down); }
+
+    /* connected summary */
+    .summary { display: flex; flex-direction: column; padding: 6px 14px; border-radius: var(--r); background: oklch(100% 0 0 / 0.03); box-shadow: inset 0 0 0 1px var(--border); }
+    .summary .row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; line-height: 30px; }
+    .summary .row span { color: var(--muted); }
+    .summary .row b { font-weight: 500; text-align: right; }
+    .summary .row b.ok { color: var(--primary); }
+    .summary .addr { font-family: var(--mono); font-size: 13px; }
+
+    /* settings */
+    details.card > summary { list-style: none; cursor: pointer; }
+    details.card > summary::-webkit-details-marker { display: none; }
+    .chev { color: var(--muted); font-size: 18px; line-height: 1; transition: transform 150ms var(--ease); }
+    details[open] .chev { transform: rotate(90deg); }
+    .toggle { display: flex; align-items: flex-start; gap: 12px; cursor: pointer; }
+    .toggle input { display: none; }
+    .toggle i { position: relative; flex: none; width: 34px; height: 20px; margin-top: 1px; border-radius: 999px; background: oklch(100% 0 0 / 0.14); transition: background-color 150ms var(--ease); }
+    .toggle i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--fg); transition: transform 150ms var(--ease); }
+    .toggle input:checked + i { background: var(--primary); }
+    .toggle input:checked + i::after { transform: translateX(14px); background: var(--primary-fg); }
+    .toggle div { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+    .toggle small { font-size: 12px; color: var(--muted); }
+    hr { border: 0; height: 1px; background: var(--border); margin: 2px 0; }
   </style>
 </head>
 <body>
   <header>
     <img src="assets/icon48.png" alt="" />
-    <div><b>Paper Route</b><span>papertrade ↔ Hyperliquid hedging, by Wayfinder</span></div>
+    <div><b>Paper Route</b><span>Hedge papertrade on Hyperliquid · by Wayfinder</span></div>
   </header>
 
-  <div class="panel">
-    <div class="panel-h"><span class="title">Hedge</span><span class="status">Hyperliquid</span></div>
-    <div class="panel-b">
-      <div class="grid">
-        <label><span class="has-tip" tabindex="0" data-tip="The papertrade account Paper Route trades and hedges. Leave it empty to use whichever account you're signed in with on papertrade.">Papertrade wallet</span><input id="ptWallet" class="mono" spellcheck="false" placeholder="Signed-in account" /></label>
-        <label><span class="has-tip" tabindex="0" data-tip="The Hyperliquid account that holds the opposite position. It must be a different address from your papertrade wallet.">Hedge wallet</span><input id="hedgeWallet" class="mono" spellcheck="false" placeholder="0x…" /></label>
-        <label><span class="has-tip" tabindex="0" data-tip="How far the hedge can drift from exactly matching papertrade, in dollars, before Tether trades to fix it. A wider band means fewer small trades and fees.">Tether band ($)</span><input id="bandUsd" type="number" min="10" /></label>
-        <label><span class="has-tip" tabindex="0" data-tip="The worst price a Hyperliquid hedge order may fill at, in basis points from the mid (30 bps = 0.3%). It's the order's limit price, so nothing fills beyond it.">Slippage (bps)</span><input id="slippageBps" type="number" min="1" max="200" /></label>
-        <label><span class="has-tip" tabindex="0" data-tip="The largest single hedge order Paper Route will send to Hyperliquid, in dollars of notional. A bigger hedge is refused with an alert, and it also caps trades placed from the HUD.">Max order ($)</span><input id="maxOrderUsd" type="number" min="10" /></label>
-        <label><span class="has-tip" tabindex="0" data-tip="The largest total hedge Paper Route will hold on Hyperliquid, in dollars of notional. It also caps the size of trades you place from the HUD.">Max hedge position ($)</span><input id="maxPositionUsd" type="number" min="10" /></label>
-        <label><span class="has-tip" tabindex="0" data-tip="How much margin to keep on papertrade for your next trade. Transfer suggestions in the HUD aim to leave at least this much there.">Papertrade margin / trade ($)</span><input id="roundMarginUsd" type="number" min="1" /></label>
-        <label><span class="has-tip" tabindex="0" data-tip="How much further away Hyperliquid's liquidation should be than papertrade's bust. At 3×, if papertrade busts 1% away, Hyperliquid should have enough margin to survive a 3% move. The HUD suggests transfers to keep this.">HL liq buffer (× bust)</span><input id="marginK" type="number" min="1" step="0.5" /></label>
+  <section class="card">
+    <div class="card-h"><span class="step" id="step1">1</span><h2>Connect Hyperliquid</h2><span class="pill" id="mainStatus">—</span></div>
+    <div class="card-b">
+      <div id="connected" hidden>
+        <div class="summary">
+          <div class="row"><span>Wallet</span><b class="addr" id="connLabel">—</b></div>
+          <div class="row"><span>Hedging</span><b class="ok" id="tradeStatus">—</b></div>
+          <div class="row"><span>Your key</span><b>Not stored</b></div>
+        </div>
       </div>
-      <p class="hint">The market (BTC or ETH) follows the papertrade page you're on.</p>
-      <div class="divider"></div>
-      <label class="check"><input id="safetyNet" type="checkbox" /><span>Safety net<small>Rests a Hyperliquid close at each papertrade position's liquidation price, so the hedge closes if papertrade busts while Chrome is closed.</small></span></label>
-      <label class="check"><input id="builderFee" type="checkbox" /><span>Wayfinder builder fee<small>0.02% of hedge order notional on Hyperliquid, on top of Hyperliquid's own fee.</small></span></label>
-      <div class="row"><button id="saveHedge" class="b primary">Save hedge settings</button><button id="reset" class="b ghost">Reset HUD position</button></div>
-      <div id="result" class="result"></div>
-    </div>
-  </div>
+      <p class="lead" id="connectedLead" hidden>Paper Route hedges with a trading key it set up on this wallet. It can place orders but can't withdraw or transfer. You'll only paste your key again to send USDC to papertrade, or to reconnect after 180 days.</p>
+      <div class="actions" id="connectedActions" hidden><button id="reconnect" class="ghost">Change wallet</button><button id="disconnect" class="danger">Disconnect</button></div>
 
-  <div class="panel">
-    <div class="panel-h"><span class="title">Main key</span><span class="status" id="mainStatus">—</span></div>
-    <div class="panel-b">
-      <p class="hint">Your hedge wallet's private key, or a Wayfinder <code>wk_</code> API key. It's only needed for transfers and one-time approvals; everyday hedging uses the trading key below.</p>
-      <div class="grid">
-        <div class="label"><span class="has-tip" tabindex="0" data-tip="Wayfinder API key: signs through a Wayfinder strategy or policy wallet. Raw private key: signs locally with the hedge wallet's own key.">Mode</span>
-          <select id="mode" class="native" data-dd><option value="wayfinder" data-sub="Strategy or policy wallet">Wayfinder API key</option><option value="key" data-sub="The hedge wallet's own key">Raw private key</option></select>
+      <div id="connectForm" class="card-b" style="padding: 0">
+        <p class="lead">Paste the private key of the Hyperliquid wallet you'll hedge with. Paper Route uses it once to set up a trading key that can trade but can't withdraw, then forgets it.</p>
+        <div class="grid">
+          <label class="field wide"><span id="secretLabel">Private key</span><input id="secret" class="mono" type="password" spellcheck="false" autocomplete="off" placeholder="0x…" /></label>
+          <label class="field wide" id="wfWalletRow" hidden><span>Wallet address</span><input id="wfWallet" class="mono" spellcheck="false" placeholder="0x… (the Wayfinder strategy or policy wallet)" /></label>
         </div>
-        <label><span class="has-tip" tabindex="0" data-tip="Paste it once. It's encrypted before it's saved and never shown again.">Key</span><input id="secret" class="mono" type="password" spellcheck="false" autocomplete="off" placeholder="wk_… or 0x…" /></label>
-        <label><span class="has-tip" tabindex="0" data-tip="Encrypts your main key. Paper Route can't recover it: if you forget it, store the key again with a new passphrase.">Passphrase</span><input id="passphrase" type="password" autocomplete="new-password" placeholder="8+ characters" /></label>
-        <div class="label"><span class="has-tip" tabindex="0" data-tip="How long the key stays usable after you unlock it, across reloads and browser restarts. Anyone using this browser profile can use it during that window.">Keep unlocked for</span>
-          <select id="unlockHours" class="native" data-dd><option value="1">1 hour</option><option value="8" selected>8 hours</option><option value="24">24 hours</option><option value="168">7 days</option></select>
-        </div>
-      </div>
-      <div class="note" id="wayfinderNote"><b>Wayfinder API keys won't work until agents and shells are fully restored.</b> Until then, use a raw private key. Once they're back, Wayfinder mode needs a strategy or policy wallet: session wallets expire after 15 minutes and an API key can't refresh them.</div>
-      <div class="note" id="rawNote" hidden>A raw key must belong to the hedge wallet above.</div>
-      <div class="secure">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="10" height="7" rx="2"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/></svg>
-        <div>
-          <p><b>Encrypted, and it never leaves this browser.</b> Your key is encrypted with your passphrase (PBKDF2, then AES-GCM) and saved in the extension's own storage. There's no Paper Route server; everything runs in your browser.</p>
-          <p>Unlocking re-wraps it under a device key that can't be exported from this browser profile, so it stays usable for the window you pick (1 hour to 7 days), even across restarts, then locks again.</p>
-        </div>
-      </div>
-      <div class="row">
-        <button id="storeKey" class="b primary">Store key</button>
-        <button id="unlockKey" class="b">Unlock</button>
-        <button id="lockKey" class="b">Lock</button>
-      </div>
-      <div class="row">
-        <button id="testKey" class="b ghost">Test signer</button>
-        <button id="forgetKey" class="b ghost">Forget key</button>
+        <div class="note" id="wfNote" hidden>Wayfinder API keys need a strategy or policy wallet (session wallets expire after 15 minutes, and an API key can't refresh them).</div>
+        <div class="actions"><button id="connect" class="primary">Connect</button><button id="cancelReconnect" class="ghost" hidden>Cancel</button></div>
+        <label class="field" style="flex-direction: row; align-items: center; gap: 8px"><span>Using a Wayfinder API key instead?</span><select id="mode" style="width: auto; height: 32px; padding-right: 30px; background-position: calc(100% - 15px) 14px, calc(100% - 10px) 14px"><option value="key">No, private key</option><option value="wayfinder">Yes, Wayfinder key</option></select></label>
       </div>
       <div id="keyResult" class="result"></div>
     </div>
-  </div>
+  </section>
 
-  <div class="panel">
-    <div class="panel-h"><span class="title">Trading key</span><span class="status" id="agentStatus">—</span></div>
-    <div class="panel-b">
-      <p class="hint">A Hyperliquid API wallet created here and approved once by your main key. It places hedge orders, stops and leverage on its own but <b>can't withdraw or transfer</b>, so it stays ready across reloads and restarts without a passphrase. Hyperliquid expires it after 180 days; revoke it any time on Hyperliquid's API page.</p>
-      <div class="row">
-        <button id="setupAgent" class="b primary">Create trading key</button>
-        <button id="forgetAgent" class="b ghost">Forget trading key</button>
-      </div>
-      <div id="agentResult" class="result"></div>
+  <section class="card">
+    <div class="card-h"><span class="step">2</span><h2>Open papertrade</h2></div>
+    <div class="card-b">
+      <p class="lead">Go to <a href="https://exchange.papertrade.xyz/trade/btc" target="_blank">papertrade</a> and sign in. Paper Route uses whichever papertrade account you're signed in to, and its panel appears on the trade page. Turn on <b>Tether</b> there, or open a hedged trade.</p>
     </div>
-  </div>
+  </section>
 
-  <div class="tooltip" role="tooltip"></div>
+  <details class="card">
+    <summary class="card-h"><h2>Settings</h2><span class="chev">›</span></summary>
+    <div class="card-b">
+      <div class="grid">
+        <label class="field"><span>Rebalance when off by ($)</span><input id="bandUsd" type="number" min="10" /><small>Tether only trades beyond this gap</small></label>
+        <label class="field"><span>Max slippage (bp)</span><input id="slippageBps" type="number" min="1" max="200" /><small>Per Hyperliquid order</small></label>
+        <label class="field"><span>Max order ($)</span><input id="maxOrderUsd" type="number" min="10" /><small>Largest single hedge order</small></label>
+        <label class="field"><span>Max hedge ($)</span><input id="maxPositionUsd" type="number" min="10" /><small>Largest total hedge</small></label>
+        <label class="field"><span>Keep on papertrade ($)</span><input id="roundMarginUsd" type="number" min="1" /><small>Used by the rebalance suggestion</small></label>
+        <label class="field"><span>Liquidation buffer (×)</span><input id="marginK" type="number" min="1" step="0.5" /><small>Hyperliquid liq vs papertrade bust</small></label>
+      </div>
+      <hr />
+      <label class="toggle"><input id="safetyNet" type="checkbox" /><i></i><div>Safety net<small>Rest a Hyperliquid close at each papertrade position's liquidation price, so the hedge closes with it even when Chrome is closed.</small></div></label>
+      <label class="toggle"><input id="builderFee" type="checkbox" /><i></i><div>Wayfinder builder fee<small>0.02% of hedge order notional on Hyperliquid.</small></div></label>
+      <div class="actions"><button id="saveHedge" class="primary">Save settings</button><button id="reset" class="ghost">Reset panel position</button></div>
+      <div id="result" class="result"></div>
+    </div>
+  </details>
+
   <script src="options.js"></script>
 </body>
 </html>

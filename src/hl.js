@@ -68,6 +68,23 @@ export function createHl() {
       withdrawable: Number(perp.withdrawable),
       spotUsdc: usdc ? Number(usdc.total) - Number(usdc.hold) : 0,
       spotUsdcTotal: usdc ? Number(usdc.total) : 0,
+      // the whole account, for the HUD's Hyperliquid section
+      positions: perp.assetPositions.map(({ position: p }) => ({
+        coin: p.coin,
+        size: Number(p.szi),
+        entry: Number(p.entryPx),
+        mark: Number(mids[p.coin]),
+        value: Number(p.positionValue),
+        uPnl: Number(p.unrealizedPnl),
+        roe: Number(p.returnOnEquity),
+        liqPx: p.liquidationPx ? Number(p.liquidationPx) : null,
+        leverage: { value: p.leverage.value, isCross: p.leverage.type === "cross" },
+        margin: Number(p.marginUsed),
+        funding: -Number(p.cumFunding.sinceOpen),
+      })),
+      spot: spot.balances
+        .filter((b) => Number(b.total) > 0)
+        .map((b) => ({ coin: b.coin, total: Number(b.total), hold: Number(b.hold), usd: b.coin === "USDC" ? Number(b.total) : Number(b.total) * Number(mids[b.coin] ?? mids[`@${b.token}`] ?? NaN) })),
     };
   }
 

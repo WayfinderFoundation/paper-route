@@ -113,6 +113,23 @@ async function exec(action, args) {
 
 const engine = createHedgeEngine({ publish, exec });
 
+async function saveHedgeWallet(address) {
+  const { hedgeSettings } = await chrome.storage.local.get("hedgeSettings");
+  const next = { ...hedgeSettings, hedgeWallet: address };
+  await chrome.storage.local.set({ hedgeSettings: next }); // the settings listener reconfigures the engine
+  return { ...HEDGE_DEFAULTS, ...next };
+}
+
+// Keys saved before the wallet field was filled in automatically: a private key's address is the
+// hedge wallet, so fill it in as soon as the key is readable (unlocked).
+async function fillHedgeWalletFromKey() {
+  const settings = await loadSettings();
+  if (settings.hedgeWallet) return;
+  const secret = await getSecret();
+  if (secret?.mode !== "key") return;
+  await saveHedgeWallet(buildSigner(secret).address);
+}
+
 async function loadSettings() {
   const { hedgeSettings } = await chrome.storage.local.get("hedgeSettings");
   return { ...HEDGE_DEFAULTS, ...hedgeSettings };
@@ -130,7 +147,38 @@ const COMMANDS = {
   hedgeNow: () => engine.hedgeNow("manual"),
   setAuto: ({ on }) => engine.setAuto(on),
   setLeverage: (args) => engine.setLeverage(args),
-  sendToPapertrade: ({ amount }) => engine.sendToPapertrade(amount),
+  sendToPapertrade: ({ amount, secret }) => engine.sendToPapertrade(amount, secret ?? null),
+  // One step: the key the user pastes is used once, in memory, to approve a trading key (trades, can't
+  // withdraw) and the builder fee on Hyperliquid, then dropped. Nothing that can withdraw is saved.
+  connect: async ({ mode, secret, wallet }) => {
+    const key = String(secret ?? "").trim();
+    if (!key) throw new Error("Paste your key");
+    let address;
+    if (mode === "key") address = buildSigner({ mode, secret: key }).address;
+    else {
+      if (!/^0x[0-9a-fA-F]{40}$/.test(wallet ?? "")) throw new Error("A Wayfinder API key also needs its wallet address");
+      address = wallet;
+    }
+    const signer = buildSigner({ mode, secret: key }, address);
+    const settings = await saveHedgeWallet(address);
+    await engine.configure(settings); // the engine has to be on this wallet before approving
+    const agent = await engine.setupAgent(signer);
+    // hedging now runs on the trading key: drop any key saved by an older version
+    await forget();
+    await chrome.storage.local.remove("vaultLabel");
+    await chrome.storage.local.set({ connection: { mode, address, at: Date.now() } });
+    // connecting is for hedging: Tether starts on (for the coin papertrade is showing) and the engine
+    // turns it on as soon as both venues are live; the user can switch it off in the panel
+    await chrome.storage.local.set({ tether: { coin: engine.coin(), hedgeWallet: address } });
+    await engine.configure(await loadSettings());
+    return { address, agent };
+  },
+  disconnect: async () => {
+    await forgetAgent();
+    await forget(); // an older saved key, if there is one
+    await chrome.storage.local.remove(["connection", "vaultLabel"]);
+    await engine.refreshVault();
+  },
   scheduleRound: (spec) => engine.scheduleRound(spec),
   cancelRound: ({ id }) => engine.cancelRound(id),
   setSessionWallet: ({ address }) => engine.setSessionWallet({ address }),
@@ -138,6 +186,7 @@ const COMMANDS = {
   setPageCoin: ({ coin }) => engine.setPageCoin({ coin }),
   unlock: async ({ passphrase, hours }) => {
     const until = await unlock(passphrase, hours ?? 8);
+    await fillHedgeWalletFromKey();
     await engine.refreshVault();
     return { until };
   },
@@ -150,15 +199,34 @@ const COMMANDS = {
     await lock();
     await engine.refreshVault();
   },
+  // One step for the user: save the key, then use it once to approve the trading key (an API wallet
+  // that trades but can't withdraw) and the builder fee. Returns what happened to each part.
   storeSecret: async (args) => {
-    const settings = await loadSettings();
+    let settings = await loadSettings();
+    if (!settings.hedgeWallet) {
+      // a private key names its own wallet; a Wayfinder API key doesn't
+      if (args.mode !== "key") throw new Error("Add your Hyperliquid hedge wallet address above and save it first");
+      settings = await saveHedgeWallet(buildSigner({ mode: "key", secret: args.secret }).address);
+      await engine.configure(settings); // trading-key setup below needs the engine on the new wallet now
+    }
     // fail before storing anything if the key doesn't match the configured hedge wallet
-    buildSigner({ mode: args.mode, secret: args.secret }, settings.hedgeWallet);
+    const signer = buildSigner({ mode: args.mode, secret: args.secret }, settings.hedgeWallet);
     await storeSecret(args);
+    // a non-secret reminder of which key is saved
+    const label = args.mode === "key" ? `Private key for ${signer.address}` : `Wayfinder API key wk_…${args.secret.slice(-4)}`;
+    await chrome.storage.local.set({ vaultLabel: label });
     await engine.refreshVault();
+    try {
+      const agent = await engine.setupAgent();
+      return { label, agent };
+    } catch (err) {
+      return { label, agentError: String(err.message || err) };
+    }
   },
   forget: async () => {
     await forget();
+    await forgetAgent();
+    await chrome.storage.local.remove("vaultLabel");
     await engine.refreshVault();
   },
   vaultStatus: () => vaultStatus(),
@@ -225,4 +293,4 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name.startsWith("round:")) engine.wakeRounds();
 });
 
-reconfigure();
+fillHedgeWalletFromKey().finally(reconfigure);

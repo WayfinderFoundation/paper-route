@@ -51,7 +51,7 @@ export function createRounds(ctx) {
 
   function log(r, text, level = null) {
     r.log = [...(r.log ?? []), { at: Date.now(), text }].slice(-12);
-    if (level) ctx.alert(level, `Round ${r.label}: ${text}`);
+    if (level) ctx.alert(level, `Trade ${r.label}: ${text}`);
   }
 
   function transition(r, state, text, level = null) {
@@ -77,7 +77,7 @@ export function createRounds(ctx) {
     if (!validLevel(spec.stopPct) || !validLevel(spec.limitPct)) throw new Error(`Stop and take profit must be between 0 and ${MAX_LEVEL_PCT}% (or off)`);
     if (spec.hlBrackets && (spec.stopPct === null || spec.limitPct === null)) throw new Error("Hyperliquid brackets need both a stop and a take profit");
     if (!(spec.marginUsd > 0) || !(spec.ptLeverage >= 1)) throw new Error("Margin and leverage are required");
-    if (rounds.some((r) => isActive(r) && r.state !== "scheduled")) throw new Error("A round is already running");
+    if (rounds.some((r) => isActive(r) && r.state !== "scheduled")) throw new Error("A hedged trade is already running");
     const r = {
       id: crypto.randomUUID(),
       label: new Date(spec.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
@@ -114,7 +114,7 @@ export function createRounds(ctx) {
 
   async function cancel(id) {
     const r = rounds.find((x) => x.id === id);
-    if (!r) throw new Error("Unknown round");
+    if (!r) throw new Error("Unknown trade");
     if (r.state === "scheduled") {
       transition(r, "cancelled", "Cancelled before opening");
     } else if (r.state === "opening") {
@@ -123,7 +123,7 @@ export function createRounds(ctx) {
       r.reason = "manual";
       transition(r, "closing", "Closing now (manual)");
     } else {
-      throw new Error(`Round is already ${r.state}`);
+      throw new Error(`Trade is already ${r.state}`);
     }
     await save();
     ctx.emit();
