@@ -63,33 +63,44 @@ function onMessage(msg) {
     if (!c) return;
     const [bids, asks] = data.levels;
     if (!bids.length || !asks.length) return;
-    c.book = {
+    c.l2 = {
       bids: bids.slice(0, 10).map((l) => [Number(l.px), Number(l.sz)]),
       asks: asks.slice(0, 10).map((l) => [Number(l.px), Number(l.sz)]),
-      at: Date.now(), // receive clock, like the data the index was fitted on
     };
+    c.book = { bids: c.l2.bids, asks: c.l2.asks };
+    c.seen = true;
   } else if (channel === "bbo") {
     const c = coins.get(data.coin);
     const [bid, ask] = data.bbo;
-    if (!c?.book || !bid || !ask) return;
-    // replace level 1; deeper levels stay from the last l2Book
+    if (!c?.l2 || !bid || !ask) return;
+    // level 1 from bbo (several updates a second; l2Book only every few seconds); deeper levels from the
+    // last l2Book, keeping those strictly behind the new best (as the index's training data was built)
+    const b1 = Number(bid.px);
+    const a1 = Number(ask.px);
     c.book = {
-      bids: [[Number(bid.px), Number(bid.sz)], ...c.book.bids.slice(1).filter((l) => l[0] < Number(bid.px))],
-      asks: [[Number(ask.px), Number(ask.sz)], ...c.book.asks.slice(1).filter((l) => l[0] > Number(ask.px))],
-      at: Date.now(),
+      bids: [[b1, Number(bid.sz)], ...c.l2.bids.slice(1).filter((l) => l[0] < b1)],
+      asks: [[a1, Number(ask.sz)], ...c.l2.asks.slice(1).filter((l) => l[0] > a1)],
     };
+    c.seen = true;
   } else if (channel === "trades") {
-    for (const t of data) coins.get(t.coin)?.trades.push({ isBuy: t.side === "B", sz: Number(t.sz) });
+    for (const t of data) {
+      const c = coins.get(t.coin);
+      if (!c) continue;
+      c.trades.push({ isBuy: t.side === "B", sz: Number(t.sz) });
+      c.seen = true;
+    }
   } else if (channel === "activeAssetCtx") {
     const c = coins.get(data.coin);
     if (!c) return;
     const x = data.ctx;
     c.assetCtx = { markPx: Number(x.markPx), oraclePx: Number(x.oraclePx), funding: Number(x.funding), openInterest: Number(x.openInterest) };
+    c.seen = true;
   }
 }
 
 // One 100 ms bucket: the latest book (forward-filled when it hasn't changed) and the trades
-// received since the previous tick, the same bucketing the index was fitted on.
+// received since the previous tick, the same bucketing the index was fitted on. A tick is
+// "observed" when any channel sent something since the last one (the gap rule counts silence).
 function tick(coin) {
   const c = coins.get(coin);
   const trades = c.trades;
@@ -98,8 +109,8 @@ function tick(coin) {
   const w = WEIGHTS[coin] ?? null;
   const frame = { kind: "market", coin, ts: now, feed: wsState, stale: true };
   if (c.book) {
-    const observed = c.book.at !== c.lastBookAt;
-    c.lastBookAt = c.book.at;
+    const observed = c.seen;
+    c.seen = false;
     const row = rowFromBook({ ts: now, book: c.book, trades, ctx: c.assetCtx });
     const out = c.engine.step(row, observed);
     if (out) {
@@ -113,6 +124,7 @@ function tick(coin) {
         warmLeftS: out.warmLeftS,
         regime: regimeOf(out.x.vol_600s, w),
         index: w ? scoreIndex(out.x, w) : null,
+        hasModel: !!w,
         provisional: !!w?.provisional,
       });
     }
@@ -122,7 +134,7 @@ function tick(coin) {
 
 function watch(coin) {
   if (coins.has(coin)) return;
-  coins.set(coin, { engine: createFlowEngine(), book: null, lastBookAt: null, trades: [], assetCtx: null, timer: setInterval(() => tick(coin), TICK_MS) });
+  coins.set(coin, { engine: createFlowEngine(), book: null, l2: null, seen: false, trades: [], assetCtx: null, timer: setInterval(() => tick(coin), TICK_MS) });
   if (ws) subscribe(coin);
   else connect();
 }

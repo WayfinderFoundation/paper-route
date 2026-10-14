@@ -175,9 +175,9 @@ papertrade's bust. One click sends USDC from Hyperliquid to your papertrade depo
 ### Order-flow overlay
 
 A panel and chart layer built only from Hyperliquid's public websocket (order book, trades, open interest,
-funding): the components (microprice, book imbalance, order-flow imbalance, taker flow, momentum, open-interest
-change, mark vs mid), a volatility regime, and a combined **order-flow index** with its expected move over the
-next 10–60 s drawn on the chart. The HUD says which way price leans for the next 10–60 s; with Tether on it also
+funding): the components (book imbalance, top-of-book queue size and change, order-flow imbalance, taker flow,
+momentum, open-interest change, mark vs mid), a volatility regime, and a combined **order-flow index** with its expected move over the
+next 10 s to 2 minutes drawn on the chart. The HUD says which way price leans over that window; with Tether on it also
 names the papertrade side that's likelier to lose (see [Earning Paper with a hedge](#earning-paper-with-a-hedge)).
 See [Does it work?](#does-it-work) for how much that's worth. The chart also shows
 papertrade's bust price and Hyperliquid's liquidation price.
@@ -206,52 +206,67 @@ Releases are built by GitHub Actions from a `v*` tag that matches `manifest.json
 
 ## Does it work?
 
-The order-flow index is a linear combination of seven Hyperliquid features, fitted to predict the BTC
-Hyperliquid mid's move over the next 10, 30 and 60 seconds:
+The order-flow index is two small linear models, fitted to predict the BTC Hyperliquid mid's move over the next
+10, 30, 60 and 120 seconds. Each forecast is `intercept + Σ weight × (feature − mean) / sd`.
 
-| Feature | What it measures | Weight per 1 sd (10 s / 30 s / 60 s, bp) |
+- **Quick model**, used from 10 seconds after the page connects. It needs only a few seconds of history.
+- **Full model**, used from 60 seconds on. It takes over as soon as its features have a minute of data.
+
+Full model:
+
+| Feature | What it measures | Weight per 1 sd (10 / 30 / 60 / 120 s, bp) |
 |---|---|---|
-| `mark_mid_bps` | Hyperliquid mark price vs the book mid | +0.23 / +0.24 / +0.26 |
-| `imb10` | Size imbalance over the top 10 book levels | +0.16 / +0.20 / +0.24 |
-| `imb5` | Size imbalance over the top 5 book levels | +0.12 / +0.21 / +0.25 |
-| `flowz_5s` | Taker buys − sells over 5 s, vs its 10-minute typical size | +0.16 / +0.17 / +0.16 |
-| `ofi_5s` | Order-flow imbalance at the top of book over 5 s | +0.14 / +0.15 / +0.13 |
-| `ret_5s` | Mid change over the last 5 s | +0.12 / +0.11 / +0.11 |
-| `micro_bps` | Size-weighted microprice vs mid | +0.10 / +0.11 / +0.10 |
+| `l1_rel_imb` | Best bid queue vs its last minute, minus the same for the best ask | +0.27 / +0.29 / +0.28 / +0.27 |
+| `imb5` | Size imbalance over the top 5 book levels | +0.16 / +0.26 / +0.31 / +0.35 |
+| `ofi_1s` | Order-flow imbalance at the top of the book over 1 s | +0.11 / +0.09 / +0.09 / +0.08 |
+| `l1dq_2s` | How fast the best bid queue grows, or the best ask queue is eaten, over 2 s | +0.09 / +0.10 / +0.11 / +0.11 |
+| `ofi_30s` | Order-flow imbalance at the top of the book over 30 s | +0.04 / +0.06 / +0.07 / +0.03 |
 
-Funding, oracle vs mid, open-interest change, longer flow and momentum windows, and 1 s / 30 s OFI were
-tested and added nothing, so they're shown in the HUD but carry no weight.
+The quick model uses the top-of-book imbalance, the top-10 imbalance, its 2 s change, and 1 s / 5 s order-flow
+imbalance normalised by the last 10 s of top-of-book size.
+
+Taker flow, momentum, open interest, funding, mark and oracle vs mid, how recently the oracle updated, trade-tape
+shape, and small nonlinear models (a GAM, a small neural net, a small TCN, a capped gradient-boosted model) were
+also tested. The nonlinear models added at most about +0.01 IC at 10 s, and nothing once you allow for acting
+2 s later, so the index stays linear.
 
 **BTC, fitted on 87 days (2026-07-04 to 09-28), scored on the next 14 days it never saw (09-29 to 10-12),
-1.08 M one-second samples.** IC is the correlation between the index's expected move and what happened next,
-with 95 % confidence intervals from resampling whole days:
+1.1 M one-second samples.** IC is the correlation between the expected move and what happened next. The
+brackets are 95 % confidence intervals from resampling whole days.
 
-| Horizon | IC | IC if you act 2 s later | Top-decile mean move | Sign right (non-zero moves) |
-|---|---|---|---|---|
-| 10 s | 0.30 [0.28, 0.32] | 0.19 [0.18, 0.21] | +0.97 bp | 72 % |
-| 30 s | 0.20 [0.19, 0.22] | 0.14 [0.13, 0.16] | +1.17 bp | 63 % |
-| 60 s | 0.15 [0.14, 0.17] | 0.11 [0.10, 0.12] | +1.23 bp | 59 % |
+| Horizon | IC | IC if you act 2 s later | Quick model IC | Top-decile mean move | Sign right (non-zero moves) |
+|---|---|---|---|---|---|
+| 10 s | 0.30 [0.28, 0.31] | 0.16 [0.15, 0.18] | 0.28 | +0.95 bp | 72 % |
+| 30 s | 0.20 [0.18, 0.21] | 0.12 [0.10, 0.14] | 0.19 | +1.07 bp | 63 % |
+| 60 s | 0.14 [0.13, 0.16] | 0.09 [0.08, 0.11] | 0.14 | +1.07 bp | 59 % |
+| 120 s | 0.11 [0.10, 0.12] | 0.07 [0.06, 0.09] | 0.11 | +1.07 bp | 57 % |
 
-By volatility regime (10-minute realised vol of 1 s returns; calm < 0.28 bp, wild ≥ 0.49 bp), the 10 s IC is
-0.36 calm, 0.39 normal and 0.28 wild. It's weakest when markets are moving fast, which is also when acting late
-costs the most.
+Training rows are rebuilt exactly as the browser sees the market: the top of the book from Hyperliquid's
+best-bid/offer feed, which updates several times a second, and deeper levels from its slower full-book feed. On
+those rows the previous seven-feature index scored 0.24 at 10 s. On the first day after the holdout
+(2026-10-13), the 10 / 30 / 60 / 120 s IC was 0.30 / 0.19 / 0.15 / 0.11.
+
+The volatility regime uses the 10-minute realised volatility of 1 s returns (calm < 0.25 bp, wild ≥ 0.42 bp). By
+regime, the 10 s IC is 0.36 calm, 0.37 normal and 0.26 wild. It's weakest when markets move fast, which is also
+when acting late costs the most.
 
 What this means in practice:
 
 - **It's real but small.** Even the strongest decile expects about 1 bp, well inside a taker round trip on
   Hyperliquid, so it doesn't pay for itself as a standalone strategy. Read it as a lean (which way the next few
   ticks are likelier to go), not as a trading signal.
-- **Speed matters.** About 46 % of 10 s moves are exactly zero (BTC sits on one tick), and much of the 10 s skill
-  is the next tick. Acting 2 s late removes a third of it.
-- **ETH is provisional.** There are only ~18 hours of ETH order-book history so far, so ETH uses BTC's weights
-  re-scaled to ETH's own feature ranges. On those hours its 10 / 30 / 60 s IC was 0.27 / 0.17 / 0.13. The HUD
-  marks ETH as provisional until it has its own fit.
-- The features need about 10 minutes of data after a page load (the taker-flow z-score and the volatility regime
-  use 10-minute windows); until then the HUD says it's warming up and missing features count as neutral.
+- **Speed matters.** Much of the 10 s skill is the next tick, and acting 2 s late removes about half of it.
+- **ETH is provisional.** There's only about a day of ETH order-book history so far, so ETH uses BTC's weights
+  re-scaled to ETH's own feature ranges. On that day its 10 / 30 / 60 / 120 s IC was 0.25 / 0.16 / 0.12 / 0.10.
+  The HUD marks ETH as provisional until it has its own fit.
+- **Start-up:** forecasts start 10 s after the page connects and switch to the full model at 60 s. Only the
+  volatility regime label needs 10 minutes of data. The feed restarts only after 10 s with no message at all;
+  shorter stalls carry the last book forward.
 
-Every feature is computed in your browser exactly as in the fit: `test/parity.mjs` replays 20 minutes of
-recorded rows through the extension's engine and matches the features computed in the fit to about 1e-6 and its
-index to about 1e-4. Formulas are at the top of `src/flowindex.js`; weights are in `src/index-weights.json`.
+Every feature is computed in your browser exactly as in the fit. `test/parity.mjs` replays 20 minutes of
+recorded 100 ms ticks through the extension's engine. It matches the fit's features and both models'
+forecasts at every horizon to about 1e-6. Formulas are at the top of `src/flowindex.js`; weights are in
+`src/index-weights.json`.
 
 ## How it works
 

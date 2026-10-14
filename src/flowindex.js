@@ -19,10 +19,16 @@
 //   oi_signed_300s   Δln(OI)·1e4 over 300 s × sign(ret_300s)
 //   mark_mid_bps / oracle_mid_bps   ln(mark | oracle / mid)·1e4;  funding_bps = funding·1e4
 //   burst_ratio      EWM(trades, half-life 5 rows) / (EWM(trades, half-life 300 rows) + 1e-3)
-// More than 2 s without a book update ends the segment: every window restarts from empty.
+//   ofiq_Ws          Σ OFI over W / 10 s mean of (bidSz1 + askSz1)  (short warm-up OFI)
+//   imb1_chg_2s      imb1_t − imb1_{t−2 s}
+//   l1_rel_imb       ln(bidSz1 / 60 s mean bidSz1) − ln(askSz1 / 60 s mean askSz1)
+//   l1dq_2s          [(bidSz1 − bidSz1_{t−2s})·1{bid1 unchanged} − (askSz1 − askSz1_{t−2s})·1{ask1 unchanged}]
+//                    / 60 s mean of (bidSz1 + askSz1)
+// A segment ends after more than 10 s with no message on any channel (book, bbo, trades, asset
+// context): every window restarts from empty. Shorter stalls are forward-filled.
 
 export const TICK_MS = 100;
-export const GAP_MS = 2000;
+export const GAP_MS = 10_000;
 const R = (s) => Math.round((s * 1000) / TICK_MS);
 
 // rolling sum/mean/std over the last n values; NaN until n values have been pushed
@@ -124,6 +130,10 @@ export function createFlowEngine() {
       lnOi: new Lag(R(300)),
       r1: Object.fromEntries(VOL_W.map((w) => [w, new Window(R(w))])),
       depth: new Window(R(60)),
+      depthQuick: new Window(R(10)),
+      bidSz: new Window(R(60)),
+      askSz: new Window(R(60)),
+      lagL1: { bid: new Lag(R(2)), bidSz: new Lag(R(2)), ask: new Lag(R(2)), askSz: new Lag(R(2)), imb1: new Lag(R(2)) },
       ofi: Object.fromEntries(OFI_W.map((w) => [w, new Window(R(w))])),
       flow: Object.fromEntries(FLOW_W.map((w) => [w, new ZWindow(R(w))])),
       burstFast: new Ewm(5),
@@ -134,7 +144,7 @@ export function createFlowEngine() {
   }
   reset();
 
-  // `observed` is false for a forward-filled bucket (no new book since the last tick)
+  // `observed` is false for a forward-filled bucket (no message on any channel since the last tick)
   function step(row, observed = true) {
     if (observed) {
       if (lastObservedTs !== null && row.ts - lastObservedTs > GAP_MS) reset();
@@ -160,8 +170,18 @@ export function createFlowEngine() {
     }
     s.prev = { bid, bidSz, ask, askSz };
     s.depth.push(bidSz + askSz);
+    s.depthQuick.push(bidSz + askSz);
+    s.bidSz.push(bidSz);
+    s.askSz.push(askSz);
     for (const w of OFI_W) s.ofi[w].push(e);
     const depth = s.depth.mean();
+    const depthQuick = s.depthQuick.mean();
+    const lag = s.lagL1;
+    const imb1 = (bidSz - askSz) / (bidSz + askSz);
+    for (const [k, v] of [["bid", bid], ["bidSz", bidSz], ["ask", ask], ["askSz", askSz], ["imb1", imb1]]) lag[k].push(v);
+    const L2 = R(2);
+    const dBid = (bidSz - lag.bidSz.ago(L2)) * (bid === lag.bid.ago(L2) ? 1 : 0);
+    const dAsk = (askSz - lag.askSz.ago(L2)) * (ask === lag.ask.ago(L2) ? 1 : 0);
 
     const net = row.buy_sz - row.sell_sz;
     const flows = Object.fromEntries(FLOW_W.map((w) => [w, s.flow[w].push(net)]));
@@ -178,12 +198,17 @@ export function createFlowEngine() {
     const d5 = row.depth_bid_5 + row.depth_ask_5;
     const x = {
       micro_bps: Math.log(micro / mid) * 1e4,
-      imb1: row.imb1,
+      imb1,
       imb5: d5 > 0 ? (row.depth_bid_5 - row.depth_ask_5) / d5 : NaN,
       imb10: row.imb10,
       ofi_1s: s.ofi[1].total() / depth,
       ofi_5s: s.ofi[5].total() / depth,
       ofi_30s: s.ofi[30].total() / depth,
+      ofiq_1s: s.ofi[1].total() / depthQuick,
+      ofiq_5s: s.ofi[5].total() / depthQuick,
+      imb1_chg_2s: imb1 - lag.imb1.ago(L2),
+      l1_rel_imb: Math.log(bidSz / s.bidSz.mean()) - Math.log(askSz / s.askSz.mean()),
+      l1dq_2s: (dBid - dAsk) / depth,
       flow_5s: flows[5].flow,
       flow_30s: flows[30].flow,
       flowz_5s: flows[5].z,
@@ -199,9 +224,10 @@ export function createFlowEngine() {
       vol_600s: s.r1[600].std(),
       burst_ratio: burst,
     };
-    const warm = Number.isFinite(x.flowz_5s) && Number.isFinite(x.vol_600s);
-    // flowz_30s is the last window to fill: 600 s of 30 s sums, after the first 30 s
-    return { x, warm, warmLeftS: warm ? 0 : Math.max(0, (R(600) + R(30) - s.rows) * (TICK_MS / 1000)) };
+    // forecasts start with the quick model (10 s of history) and switch to the full one at 60 s;
+    // only the regime label waits for 10 minutes of returns
+    const regimeLeftS = Number.isFinite(x.vol_600s) ? 0 : Math.max(0, (R(600) + R(1) - s.rows) * (TICK_MS / 1000));
+    return { x, warm: regimeLeftS === 0, warmLeftS: regimeLeftS, rows: s.rows };
   }
 
   return { step, reset };
@@ -242,21 +268,25 @@ export function rowFromBook({ ts, book, trades, ctx }) {
 }
 
 // weights (src/index-weights.json, per coin):
-//   { features, mean, std, horizons: { "10": { coef, intercept, scale, ic, show } }, regimes: { vol600: [calm, normal] } }
+//   { models: { quick, full }, regimes: { vol600: [calm, normal] }, provisional? }
+//   model = { features, mean, std, history_s, horizons: { "10": { coef, intercept, scale, ic, show } } }
 // pred_bp = intercept + Σ coef·(x − mean)/std;  index = clip(50·pred/scale, −100, 100)
+// The full model is used once all its features exist (60 s after a segment starts), the quick one
+// before that (10 s); nothing before the quick one is ready.
 export function scoreIndex(x, weights) {
-  const z = weights.features.map((f, i) => {
-    const v = x[f];
-    return Number.isFinite(v) ? (v - weights.mean[i]) / weights.std[i] : 0;
-  });
-  const horizons = Object.entries(weights.horizons).map(([s, h]) => {
+  const ready = (m) => m && m.features.every((f) => Number.isFinite(x[f]));
+  const tier = ready(weights.models.full) ? "full" : ready(weights.models.quick) ? "quick" : null;
+  if (!tier) return null;
+  const m = weights.models[tier];
+  const z = m.features.map((f, i) => (x[f] - m.mean[i]) / m.std[i]);
+  const horizons = Object.entries(m.horizons).map(([s, h]) => {
     const terms = z.map((zi, i) => zi * h.coef[i]);
     const bps = h.intercept + terms.reduce((a, b) => a + b, 0);
     return { s: Number(s), ret_bps: bps, score: Math.max(-100, Math.min(100, (50 * bps) / h.scale)), terms, show: h.show !== false, ic: h.ic ?? null };
   });
   const lead = horizons.find((h) => h.show) ?? horizons[0];
-  const components = weights.features.map((f, i) => ({ name: f, value: x[f], z: z[i], contrib: lead.terms[i] }));
-  return { horizons, score: lead.score, lead: lead.s, components, provisional: !!weights.provisional };
+  const components = m.features.map((f, i) => ({ name: f, value: x[f], z: z[i], contrib: lead.terms[i] }));
+  return { horizons, score: lead.score, lead: lead.s, components, model: tier, provisional: !!weights.provisional };
 }
 
 export function regimeOf(vol600, weights) {

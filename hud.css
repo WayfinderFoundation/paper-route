@@ -375,6 +375,8 @@ button[data-tip], label[data-tip], input[data-tip] { cursor: pointer; }
 /* ---------- order flow: the plain long / short answer ---------- */
 .fx-lead.up { color: var(--up); }
 .fx-lead.dn { color: var(--down); }
+/* the header repeats the lean only while the section is collapsed; open, the lean box says it */
+.flow:not(.collapsed) > .sec-h .fx-lead { display: none; }
 .fx-lean { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; padding: 10px 12px; border-radius: 14px; background: var(--surface-1); }
 .fx-lean-v { font: 600 18px/24px var(--font-heading); }
 .fx-lean-t { font-size: 12px; line-height: 16px; color: var(--muted); text-align: right; }

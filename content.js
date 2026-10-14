@@ -40,7 +40,9 @@
   const COMPONENTS = [
     { label: "Microprice", keys: ["micro_bps"], unit: "bp", hint: "Size-weighted top of book vs mid" },
     { label: "Book imbalance", keys: ["imb5", "imb10", "imb1"], unit: "", hint: "(bids − asks) / (bids + asks), top levels" },
-    { label: "Order-flow imbalance", keys: ["ofi_5s", "ofi_1s", "ofi_30s"], unit: "", hint: "Cont–Kukanov–Stoikov OFI over the window, per unit of top-of-book depth" },
+    { label: "Queue vs normal", keys: ["l1_rel_imb"], unit: "", hint: "Best bid queue vs its last minute, minus the same for the best ask: a bigger-than-usual bid queue leans up" },
+    { label: "Queue change", keys: ["l1dq_2s", "imb1_chg_2s"], unit: "", hint: "How fast the best bid queue grows (or the best ask queue is eaten) over the last 2 seconds" },
+    { label: "Order-flow imbalance", keys: ["ofi_1s", "ofiq_1s", "ofi_30s", "ofiq_5s", "ofi_5s"], unit: "", hint: "Cont–Kukanov–Stoikov OFI over the window, per unit of top-of-book depth" },
     { label: "Taker flow", keys: ["flowz_5s", "flowz_30s"], unit: "z", hint: "Aggressive buys − sells over the window, vs its own 10-minute typical size" },
     { label: "Momentum", keys: ["ret_5s", "ret_30s", "ret_300s"], unit: "bp", hint: "Mid change over the window" },
     { label: "Open interest", keys: ["oi_signed_300s"], unit: "bp", hint: "5-minute OI change, signed by the price move" },
@@ -106,15 +108,15 @@
         </div>
       </div>
       <section class="flow collapsed">
-        <div class="sec-h" data-act="toggle"><span class="cap" data-tip="What it's for: timing a short-term entry. It reads Hyperliquid's order book and trades for which way price leans over the next 10 to 60 seconds. With Tether on, it also names the papertrade side that's likelier to lose, since a hedged papertrade loss earns Paper. It's a short-term tilt only: it says nothing beyond about a minute.">${ICON_CHEVRON}Order flow</span><span class="cap-r fx-lead" data-tip="Which way the order flow leans right now, for the next 10 to 60 seconds">—</span></div>
-        <div class="fx-lean" data-tip="Which way Hyperliquid's price leans for the next 10 to 60 seconds. With Tether on, leaning up favours a papertrade short (likelier to lose, earning Paper, while its Hyperliquid hedge gains) and leaning down a papertrade long. A short-term tilt only, so it helps most when your papertrade order fills quickly.">
+        <div class="sec-h" data-act="toggle"><span class="cap" data-tip="What it's for: timing a short-term entry. It reads Hyperliquid's order book and trades for which way price leans over the next 10 seconds to 2 minutes. With Tether on, it also names the papertrade side that's likelier to lose, since a hedged papertrade loss earns Paper. It's a short-term tilt only: it says nothing beyond about two minutes.">${ICON_CHEVRON}Order flow</span><span class="cap-r fx-lead" data-tip="Which way the order flow leans right now, for the next 10 seconds to 2 minutes">—</span></div>
+        <div class="fx-lean" data-tip="Which way Hyperliquid's price leans for the next 10 seconds to 2 minutes. With Tether on, leaning up favours a papertrade short (likelier to lose, earning Paper, while its Hyperliquid hedge gains) and leaning down a papertrade long. A short-term tilt only, so it helps most when your papertrade order fills quickly.">
           <span class="fx-lean-v">—</span>
           <span class="fx-lean-t">—</span>
         </div>
         <div class="fx-regime" data-tip="How fast the market is moving: 10-minute volatility of 1-second moves. Calm, normal or wild. The order-flow read is least reliable when it's wild."><span class="lbl">Volatility</span><span class="regime">—</span></div>
-        <div class="fx-gauge-h"><span class="lbl" data-tip="Which way Hyperliquid's price leans, from −100 (down) to +100 (up), and the expected price 10, 30 and 60 seconds out. Green is up, red is down, grey is no clear lean.">Price lean</span></div>
+        <div class="fx-gauge-h"><span class="lbl" data-tip="Which way Hyperliquid's price leans, from −100 (down) to +100 (up), and the expected price 10, 30, 60 and 120 seconds out. Green is up, red is down, grey is no clear lean.">Price lean</span></div>
         <div class="fx-gauge" data-tip="−100 to +100. Green = the book and trades lean up, red = down, grey = no clear lean."><div class="fx-track"><i class="fx-fill"></i><b class="fx-needle"></b></div><span class="fx-score">—</span></div>
-        <div class="ladder" data-tip="Expected move and price in 10, 30 and 60 seconds according to the order-flow read"></div>
+        <div class="ladder" data-tip="Expected move and price in 10, 30, 60 and 120 seconds according to the order-flow read"></div>
         <details class="fx-more">
           <summary data-tip="The order-book and trade readings the lean is built from">See the inputs <span class="hx-chev">›</span></summary>
           <div class="fx-comps"></div>
@@ -263,6 +265,18 @@
       c.bar.className = push > 0 ? "up" : push < 0 ? "dn" : "idle";
     }
 
+    if (!idx && f.hasModel) {
+      els.lead.textContent = "Starting…";
+      els.score.textContent = "—";
+      els.fill.style.width = "0";
+      els.needle.style.left = "50%";
+      els.ladder.hidden = true;
+      els.leanV.textContent = "Starting";
+      els.leanV.className = "fx-lean-v";
+      els.leanT.textContent = "Forecasts begin after 10 seconds of live data";
+      els.note.textContent = "";
+      return;
+    }
     if (!idx) {
       els.lead.textContent = "components only";
       els.score.textContent = "—";
@@ -286,7 +300,9 @@
     els.lead.className = `cap-r fx-lead ${tone}`;
     els.leanV.textContent = up === null ? "No clear lean" : `Leans ${up ? "up" : "down"}`;
     els.leanV.className = `fx-lean-v ${tone}`;
-    els.leanT.textContent = `${up === null ? "Too weak to call" : "Next 10–60s"}${up !== null && hedged ? ` · hedged: favours papertrade ${up ? "short" : "long"}` : ""}${f.provisional ? " · provisional" : ""}`;
+    const span = shownHorizons(f).map((h) => h.s);
+    const next = span.length ? `Next ${span[0]}–${span[span.length - 1]}s` : "Next minute";
+    els.leanT.textContent = `${up === null ? "Too weak to call" : next}${up !== null && hedged ? ` · hedged: favours papertrade ${up ? "short" : "long"}` : ""}${f.provisional ? " · provisional" : ""}`;
     els.leanT.dataset.tip = leadH?.ic != null ? `IC ${leadH.ic.toFixed(2)} at ${idx.lead}s: how well this read has matched the next moves historically (0 = no skill, 1 = perfect)` : "";
     els.score.textContent = `${s >= 0 ? "+" : "−"}${Math.abs(s).toFixed(0)}`;
     els.score.className = `fx-score ${Math.abs(s) < LEAN_AT ? "" : s > 0 ? "up" : "dn"}`;
@@ -309,8 +325,8 @@
       r.fill.className = `${h.ret_bps >= 0 ? "up" : "dn"} ${cls === "idle" ? "idle" : ""}`;
       r.fill.style.transform = `scaleX(${Math.max(0.04, Math.min(1, Math.abs(h.ret_bps) / scale))})`;
     }
-    els.note.textContent = !f.warm
-      ? `Warming up: taker flow and the regime need 10 minutes of live data (${f.warmLeftS ? `${Math.ceil(f.warmLeftS / 60)} min left` : "starting"}).`
+    els.note.textContent = idx.model === "quick"
+      ? "Quick read from the first seconds of data; the full model takes over after a minute."
       : f.provisional
         ? "ETH uses BTC's weights re-scaled to ETH; its own fit needs more ETH history."
         : "";
@@ -616,7 +632,10 @@
     state.hudDirty ||= hud;
     if (state.dirty) return;
     state.dirty = true;
-    requestAnimationFrame(() => {
+    // Chrome stops animation frames for windows it thinks aren't visible (behind another window,
+    // another desktop), which froze the price; a timer flushes the same update if no frame comes.
+    const flush = () => {
+      if (!state.dirty) return;
       state.dirty = false;
       if (state.hudDirty) {
         state.hudDirty = false;
@@ -624,7 +643,9 @@
         renderStatus();
       }
       drawOverlay();
-    });
+    };
+    requestAnimationFrame(flush);
+    setTimeout(flush, 250);
   }
   setInterval(renderStatus, 250);
 
