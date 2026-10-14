@@ -12,6 +12,19 @@
 
 BTC and ETH. Everything runs in your browser; there's no Paper Route server.
 
+## The play
+
+Papertrade pays out **Paper** when you lose. Paper Route holds the opposite position on Hyperliquid, so as your
+papertrade position loses, the Hyperliquid one gains about the same: you collect Paper while your dollars stay
+roughly where they were.
+
+1. Place trades on **papertrade's own order ticket**, as usual.
+2. With **Tether** on, Paper Route opens the opposite side on Hyperliquid as each papertrade order fills, and closes
+   it when the papertrade position closes.
+3. To pick a side, use the HUD's **Order flow**. You want papertrade to lose, so when Hyperliquid's price leans up
+   it favours a **papertrade short** (red), and when it leans down a **papertrade long** (green). It's a 10–60 second
+   tilt, so it matters most when your order fills quickly, and larger papertrade orders tend to fill faster.
+
 > Papertrade and Hyperliquid are separate venues with real money on both. Nothing here is financial advice.
 > Read [Risks](#risks) before you turn anything on.
 
@@ -63,7 +76,8 @@ builder fee. Then it forgets your key: nothing that can withdraw is saved. You'l
 send USDC from Hyperliquid to papertrade, or to reconnect after 180 days. Your papertrade account is picked up
 from the one you're signed in to on papertrade. The two can be the same wallet.
 
-Back on papertrade, pick the Hyperliquid leverage in the panel, then turn on **Tether** (connecting turns it on for you).
+Back on papertrade, pick the Hyperliquid leverage in the panel, then turn on **Tether** (connecting turns it on for you)
+and place trades on papertrade's order ticket as usual.
 If a trade is too small for papertrade's minimum, the panel says what to change (usually a higher Hyperliquid
 leverage, or more USDC).
 
@@ -127,7 +141,8 @@ papertrade's bust. One click sends USDC from Hyperliquid to your papertrade depo
 A panel and chart layer built only from Hyperliquid's public websocket (order book, trades, open interest,
 funding): the components (microprice, book imbalance, order-flow imbalance, taker flow, momentum, open-interest
 change, mark vs mid), a volatility regime, and a combined **order-flow index** with its expected move over the
-next 10–60 s drawn on the chart. See [Does it work?](#does-it-work) for how much that's worth. The chart also shows
+next 10–60 s drawn on the chart. The HUD turns that lean into a papertrade side (see [The play](#the-play)). See
+[Does it work?](#does-it-work) for how much that's worth. The chart also shows
 papertrade's bust price and Hyperliquid's liquidation price.
 
 ### Fees

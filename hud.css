@@ -226,7 +226,7 @@ section.collapsed { padding-bottom: 0; }
 .hx-rebal-row { display: flex; gap: 6px; }
 .hx-rebal-row .pbtn { padding: 0 10px; }
 /* confirm rows open directly under the control that asked for them (moved there in hedge-ui.js) */
-.hx-confirm { display: flex; flex-direction: column; gap: 10px; margin: 0 0 12px; padding: 12px; border-radius: 14px; background: rgba(251, 191, 36, 0.1); box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.3); font-size: 12px; line-height: 16px; animation: reveal 200ms ease-out; }
+.hx-confirm { display: flex; flex-direction: column; gap: 10px; margin: 0 0 12px; padding: 12px; border-radius: 14px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); font-size: 12px; line-height: 16px; color: var(--fg); animation: reveal 200ms ease-out; }
 .hx-confirm .pbtn { height: 32px; line-height: 32px; }
 @keyframes reveal { from { opacity: 0; transform: translateY(-4px); } }
 .hx-confirm > div { display: flex; gap: 6px; }
@@ -329,29 +329,29 @@ section.collapsed { padding-bottom: 0; }
 .sc-when .sc-now { flex: none; }
 
 /* ---------- keep-running notices ---------- */
-.pr-banner { margin: 12px 12px 0; padding: 10px 12px; border-radius: 14px; font-size: 12px; line-height: 1.4; color: var(--amber); background: rgba(251, 191, 36, 0.1); box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.3); }
+.pr-banner { position: relative; margin: 12px 12px 0; padding: 10px 12px 10px 26px; border-radius: 14px; font-size: 12px; line-height: 16px; color: var(--fg); background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line); }
+.pr-banner::before { content: ""; position: absolute; left: 12px; top: 15px; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
 .sc-watch { font-size: 12px; color: var(--muted); }
 .sc-pct { width: 64px; flex: none; }
 .sc-row .seg { flex-wrap: wrap; }
-.hx-netline { font-size: 12px; color: var(--muted); }
+/* status sentences stay muted; a 6px dot carries the tone, like simple mode's status rows */
+.hx-netline, .hx-status-t { position: relative; padding-left: 14px; font-size: 12px; line-height: 16px; color: var(--muted); }
 .hx-netline:empty { display: none; }
-.hx-netline.up { color: var(--up); }
-.hx-netline.warn { color: var(--amber); }
-.hx-netline.dn { color: var(--down); }
+.hx-netline::before, .hx-status-t::before { content: ""; position: absolute; left: 0; top: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--surface-3); }
+.hx-netline.up::before, .hx-status-t.up::before { background: var(--primary); }
+.hx-netline.warn::before, .hx-status-t.warn::before { background: var(--amber); }
+.hx-netline.dn::before, .hx-status-t.dn::before { background: var(--down); }
 
 /* ---------- tooltips ---------- */
 .tip { position: fixed; z-index: 2147483647; max-width: 260px; padding: 8px 12px; border-radius: 10.5px; font: 400 12px/16px var(--font); letter-spacing: -0.005em; color: var(--fg); background: var(--menu); box-shadow: inset 0 0 0 1px rgba(155, 159, 165, 0.12), 0 10px 24px -6px rgba(0, 0, 0, 0.6); pointer-events: none; white-space: normal; -webkit-font-smoothing: antialiased; }
 [data-tip] { cursor: help; }
 /* labels with an explanation get simple mode's dotted underline instead of an icon */
-.lbl[data-tip], .cap[data-tip], .tag[data-tip], [data-tip] > .lbl, summary[data-tip] > .lbl {
+.lbl[data-tip], .tag[data-tip] {
   text-decoration: underline dotted var(--line-3); text-decoration-thickness: 1px; text-underline-offset: 4px;
 }
-.lbl[data-tip]:hover, .cap[data-tip]:hover, [data-tip]:hover > .lbl { text-decoration-color: var(--muted); }
+.lbl[data-tip]:hover, .tag[data-tip]:hover { text-decoration-color: var(--muted); }
 button[data-tip], label[data-tip], input[data-tip] { cursor: pointer; }
-.hx-status-t { font-size: 12px; line-height: 1.45; color: var(--muted); margin: -2px 0 10px; }
-.hx-status-t.up { color: var(--up); }
-.hx-status-t.warn { color: var(--amber); }
-.hx-status-t.dn { color: var(--down); }
+.hx-status-t { margin: 0 0 12px; }
 .badge.hx-status { cursor: help; }
 
 /* ---------- Hyperliquid account ---------- */
@@ -375,15 +375,9 @@ button[data-tip], label[data-tip], input[data-tip] { cursor: pointer; }
 .hx-tether-on { width: 100%; height: 36px; margin: -4px 0 12px; }
 
 /* ---------- accounts & transfers dropdown ---------- */
-.hx-accts { border-radius: 10.5px; background: var(--surface-1); }
-.hx-accts > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; font-size: 12px; }
-.hx-accts > summary::-webkit-details-marker { display: none; }
-.hx-accts > summary .lbl { font-size: 13px; color: var(--fg); }
 .hx-accts-sum { flex: 1; text-align: right; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hx-chev { color: var(--muted); transition: transform 150ms var(--ease); }
-.hx-accts[open] .hx-chev { transform: rotate(90deg); }
 .hx-accts-b { display: flex; flex-direction: column; gap: 12px; padding: 0 12px 12px; }
-.hx-accts .hx-bal > div { background: var(--surface-2); }
 .hla-title { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
 .hla-title .lbl { font-size: 12px; }
 .hla-addr { font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
@@ -402,12 +396,13 @@ button[data-tip], label[data-tip], input[data-tip] { cursor: pointer; }
 .fx-lean-t { font-size: 12px; line-height: 16px; color: var(--muted); text-align: right; }
 .fx-regime { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 .fx-regime .lbl { font-size: 12px; }
-.regime { font-size: 12px; font-weight: 500; text-transform: capitalize; }
+.regime { display: inline-block; font-size: 12px; font-weight: 500; }
+.regime::first-letter { text-transform: uppercase; }
 
 /* ---------- wallets / move funds ---------- */
 .hx-sub { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .hx-sub .lbl { font-size: 12px; font-weight: 500; }
-.hx-fast { font-size: 12px; line-height: 16px; color: var(--up); padding: 8px 12px; border-radius: 10.5px; background: rgba(9, 193, 90, 0.08); }
+.hx-fast { font-size: 12px; line-height: 16px; color: var(--muted); }
 .hx-fast:empty { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -420,3 +415,27 @@ button[data-tip], label[data-tip], input[data-tip] { cursor: pointer; }
 .hx-rebal-row .field { flex: 1 0 100%; }
 .hx-rebal-row .pbtn { flex: 1; padding: 0 12px; font-size: 12px; }
 .hx-bal small { white-space: pre-line; }
+
+.fx-gauge-h { margin-bottom: 4px; }
+.fx-gauge-h .lbl { font-size: 12px; }
+.fx-lean-v.up { color: var(--up); }
+.fx-lean-v.dn { color: var(--down); }
+
+/* ---------- how you earn Paper: the two legs, as label / value rows ---------- */
+.play { display: flex; flex-direction: column; gap: 8px; margin: 0 12px 12px; padding: 12px; border-radius: 14px; background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line); }
+.play > .lbl { align-self: flex-start; font-size: 12px; font-weight: 500; }
+.play-legs { display: grid; grid-template-columns: auto 1fr auto; column-gap: 10px; row-gap: 4px; align-items: baseline; font-size: 12px; line-height: 16px; }
+.play-legs span { font-weight: 500; color: var(--fg); }
+.play-legs em { font-style: normal; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.play-legs b { font-weight: 500; color: var(--fg); text-align: right; white-space: nowrap; }
+.play p { margin: 0; padding-top: 8px; font-size: 12px; line-height: 16px; color: var(--muted); box-shadow: inset 0 1px 0 var(--line); }
+
+/* ---------- accounts & transfers section ---------- */
+.accts .hx-accts-b { padding: 0; }
+.accts .hx-bal > div { background: var(--surface-1); }
+.hx-accts-sum.suggest { display: inline-flex; align-items: center; gap: 6px; color: var(--fg); }
+.hx-accts-sum.suggest::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
+.accts:not(.collapsed) .hx-accts-sum { display: none; }
+.accts.collapsed > :not(.sec-h) { display: none !important; }
+.foot a { color: var(--muted); text-decoration: none; transition: color 150ms ease-out; }
+.foot a:hover { color: var(--fg); }

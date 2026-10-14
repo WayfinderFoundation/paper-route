@@ -51,15 +51,13 @@
         </div>
         <button class="pbtn primary hx-hedge" data-act="hedge" hidden data-tip="One-off, for when Tether is off: trade Hyperliquid once so it exactly offsets your open papertrade position. You confirm the size and fees first.">Hedge now</button>
         <div class="hx-grid">
-          <span class="lbl" data-tip="Papertrade profit or loss if you closed now, after papertrade's fee on wins">Paper P&amp;L</span><span class="hx-ptpnl">—</span>
+          <span class="lbl" data-tip="Papertrade profit or loss if you closed now. In this play you want it negative: papertrade losses earn Paper, and the Hyperliquid hedge makes them back.">Paper P&amp;L</span><span class="hx-ptpnl">—</span>
           <span class="lbl" data-tip="Hyperliquid profit or loss on the hedge, including funding paid or received">HL P&amp;L</span><span class="hx-hlpnl">—</span>
           <span class="lbl" data-tip="Both legs together. When fully hedged this stays near zero apart from fees, funding and papertrade's win fee.">Net</span><span class="hx-net-pnl">—</span>
           <span class="lbl" data-tip="Price at which papertrade liquidates your position (you lose that margin), and how far away it is">Paper bust</span><span class="hx-bust">—</span>
           <span class="lbl" data-tip="Price at which Hyperliquid would liquidate the hedge. It should be further away than papertrade's bust. Red means it's too close for your buffer setting.">HL liq</span><span class="hx-liq">—</span>
         </div>
         <div class="hx-netline" data-tip="Safety net: orders resting on Hyperliquid at papertrade's liquidation prices. If papertrade busts while this browser is closed, the hedge closes with it at the same price."></div>
-        <details class="hx-accts">
-          <summary data-tip="Balances on both venues, moving USDC between them, and every position on your Hyperliquid account"><span class="lbl">Accounts &amp; transfers</span><span class="hx-accts-sum"></span><span class="hx-chev">›</span></summary>
           <div class="hx-accts-b">
         <div class="hx-bal">
           <div data-tip="USDC in papertrade that's free for new positions. Queued means a deposit papertrade hasn't credited yet."><span class="lbl">Papertrade</span><b class="hx-ptav">—</b><small class="hx-ptq"></small></div>
@@ -76,7 +74,6 @@
         </div>
         <div class="hx-acct-slot"></div>
           </div>
-        </details>
       </div>
       <div class="hx-unlock" hidden>
         <input class="field hx-pass" type="password" placeholder="Main key passphrase (for transfers)" autocomplete="off" data-tip="Your main key is only needed to move USDC and for one-time approvals. Hedging uses the trading key." />
@@ -84,7 +81,28 @@
       </div>
       <div class="hx-alerts"></div>
     </div>`;
-  hud.body.insertBefore(card, hud.flow); // the hedge leads; order flow is an optional extra below
+  hud.body.append(card);
+
+  // ---------- Accounts & transfers: its own section under Tether ----------
+  // Balances, moving USDC and every Hyperliquid position. Folded by default; while folded, the
+  // header shows both balances, or the suggested transfer when there is one.
+  const acctSec = el("section", "accts collapsed");
+  acctSec.innerHTML = `
+    <div class="sec-h" data-act="toggle"><span class="cap" data-tip="Balances on both venues, moving USDC between them, and every position on your Hyperliquid account">${hud.chevron}Accounts &amp; transfers</span><span class="cap-r hx-accts-sum"></span></div>`;
+  acctSec.append(card.querySelector(".hx-accts-b"));
+  card.after(acctSec);
+  chrome.storage.local.get("acctsOpen").then(({ acctsOpen }) => acctSec.classList.toggle("collapsed", !acctsOpen));
+
+  // ---------- how you earn Paper: the two legs, above all the sections ----------
+  const play = el("div", "play");
+  play.innerHTML = `
+    <span class="lbl" data-tip="Papertrade pays out Paper on losses. Paper Route holds the opposite position on Hyperliquid, so as your papertrade position loses, the Hyperliquid one gains about the same: you collect Paper while your dollars stay roughly where they were.">How you earn Paper</span>
+    <div class="play-legs">
+      <span>Papertrade</span><em>meant to lose</em><b>earns Paper</b>
+      <span>Hyperliquid</span><em>the opposite side</em><b>wins it back</b>
+    </div>
+    <p>You only place orders on papertrade. Paper Route hedges it on Hyperliquid.</p>`;
+  hud.flow.before(play);
 
   // ---------- Hyperliquid positions, inside "Accounts & transfers" ----------
   const acct = el("div", "hlacct");
@@ -92,17 +110,15 @@
     <div class="hla-title"><span class="lbl" data-tip="Every open perp position on your Hyperliquid wallet, on all coins">Hyperliquid positions</span><span class="hla-addr" data-tip="Your connected Hyperliquid wallet"></span></div>
     <div class="hla-pos"></div>
     <div class="hla-spot"></div>`;
-  card.querySelector(".hx-acct-slot").append(acct);
+  acctSec.querySelector(".hx-acct-slot").append(acct);
   const aq = (sel) => acct.querySelector(sel);
-  const accts = card.querySelector(".hx-accts");
-  chrome.storage.local.get("acctsOpen").then(({ acctsOpen }) => (accts.open = !!acctsOpen));
-  accts.addEventListener("toggle", () => chrome.storage.local.set({ acctsOpen: accts.open }));
 
   const fmtSz = (v) => Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 5 });
   const fmtPrice = (v) => (v == null || !Number.isFinite(v) ? "—" : v.toLocaleString("en-US", { maximumFractionDigits: v >= 100 ? 1 : 4 }));
 
   function renderAccount() {
     const h = snap?.hl.account;
+    acctSec.hidden = !snap?.settings.hedgeWallet || !snap.pt.summary || !h || !!snap.lockedBy;
     acct.hidden = !snap?.settings.hedgeWallet;
     if (acct.hidden) return;
     aq(".hla-addr").textContent = short(snap.settings.hedgeWallet);
@@ -111,7 +127,12 @@
       return;
     }
     const pt = snap.pt.summary;
-    card.querySelector(".hx-accts-sum").textContent = `${pt ? `${usdK(pt.available)} papertrade · ` : ""}${Number.isFinite(h.equity) ? usdK(h.equity) : "—"} Hyperliquid`;
+    const sg = snap.suggestion;
+    const sum = acctSec.querySelector(".hx-accts-sum");
+    sum.textContent = sg?.direction
+      ? `Move $${sg.amount} to ${sg.direction === "toPapertrade" ? "papertrade" : "Hyperliquid"}`
+      : `${pt ? `${usdK(pt.available)} paper · ` : ""}${Number.isFinite(h.equity) ? usdK(h.equity) : "—"} HL`;
+    sum.className = `cap-r hx-accts-sum${sg?.direction ? " suggest" : ""}`;
 
     const coin = snap.settings.coin;
     const head = el("div", "hla-row hla-head");
@@ -150,7 +171,7 @@
       : "";
   }
 
-  const q = (s) => card.querySelector(s);
+  const q = (s) => card.querySelector(s) ?? acctSec.querySelector(s);
   const ui = Object.fromEntries(
     ["hx-signer", "hx-empty", "hx-main", "hx-pt", "hx-hl", "hx-dtext", "hx-pct", "hx-auto", "hx-ptpnl", "hx-hlpnl", "hx-net-pnl", "hx-bust", "hx-liq", "hx-ptav", "hx-ptq", "hx-hleq", "hx-hlw", "hx-sugg", "hx-amt", "hx-confirm", "hx-confirm-t", "hx-unlock", "hx-pass", "hx-alerts", "hx-levs", "hx-mode", "hx-plan", "hx-netline", "hx-status", "hx-status-t", "hx-xkey", "hx-tether-on", "hx-fast"].map((c) => [c, q(`.${c}`)]),
   );
@@ -443,7 +464,9 @@
     renderPlan();
 
     const net = pt.uPnlAfterFee + h.uPnl + h.funding;
-    setNum(ui["hx-ptpnl"], pt.uPnlAfterFee, s.winFeeRate ? ` after ${(s.winFeeRate * 100).toFixed(0)}% win fee` : "");
+    // a papertrade loss is the point of the play (it earns Paper), so it isn't shown as bad news
+    setNum(ui["hx-ptpnl"], pt.uPnlAfterFee, pt.uPnlAfterFee < 0 ? " · earns Paper" : "");
+    ui["hx-ptpnl"].className = `hx-ptpnl ${pt.uPnlAfterFee < 0 ? "up" : ""}`;
     setNum(ui["hx-hlpnl"], h.uPnl + h.funding, h.funding ? ` incl. ${signed(h.funding)} funding` : "");
     setNum(ui["hx-net-pnl"], net, "");
     ui["hx-bust"].textContent = pt.bust ? `${fmtPx(pt.bust)} · ${(s.ptBustDist * 100).toFixed(2)}%` : "—";
@@ -469,7 +492,7 @@
           ? `Suggested: move $${sg.amount} to Hyperliquid. It's $${Math.ceil(-sg.hlExcess)} short of a ${s.settings.marginK}× liquidation buffer.`
           : "No transfer needed: both wallets hold what they need. You can still move USDC either way.";
     if (sg?.direction && !ui["hx-amt"].value) ui["hx-amt"].placeholder = String(sg.amount);
-    for (const b of card.querySelectorAll('[data-act="toPt"], [data-act="toHl"]')) b.disabled = !!s.busy;
+    for (const b of acctSec.querySelectorAll('[data-act="toPt"], [data-act="toHl"]')) b.disabled = !!s.busy;
 
     renderAlerts();
   }
@@ -647,11 +670,15 @@
     return `${d.delta > 0 ? "Buy" : "Sell"} ${qty(sz)} ${snap.settings.coin} on Hyperliquid ≈ ${usd(sz * d.mid, 0)} at ${lev}x ${snap.settings.hlCross ? "cross" : "isolated"} · fees ~${usd(fee)}`;
   }
 
-  card.addEventListener("click", async (e) => {
+  // Tether and Accounts & transfers share one handler (transfers and their confirm row live in the latter)
+  async function onClick(e) {
     const act = e.target.closest("[data-act]")?.dataset.act;
     if (!act) return;
     try {
-      if (act === "toggle") card.classList.toggle("collapsed");
+      if (act === "toggle") {
+        const open = !e.currentTarget.classList.toggle("collapsed");
+        if (e.currentTarget === acctSec) chrome.storage.local.set({ acctsOpen: open });
+      }
       else if (act === "tether-on") {
         await send("setAuto", { on: true });
         flash("ok", "Tether on: papertrade fills are now hedged on Hyperliquid", ui["hx-tether-on"]);
@@ -705,7 +732,9 @@
       const near = { lev: q(".hx-lev"), mode: q(".hx-lev"), hedge: hedgeBtn, toPt: q(".hx-rebal-row"), toHl: q(".hx-rebal-row"), "tether-on": ui["hx-tether-on"], unlock: ui["hx-unlock"] }[act];
       flash("error", String(err.message || err), near ?? confirmAnchor);
     }
-  });
+  }
+  card.addEventListener("click", onClick);
+  acctSec.addEventListener("click", onClick);
 
   ui["hx-auto"].addEventListener("change", async (e) => {
     try {

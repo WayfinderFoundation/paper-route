@@ -106,12 +106,13 @@
         </div>
       </div>
       <section class="flow collapsed">
-        <div class="sec-h" data-act="toggle"><span class="cap" data-tip="What it's for: timing a short-term entry. It reads Hyperliquid's order book and trades and leans toward which way price is likelier to go over the next 10 to 60 seconds. Use it for which side to enter right now, not for a longer-term view: the edge fades after about a minute, and even the strongest lean is about 1 bp.">${ICON_CHEVRON}Order flow</span><span class="cap-r fx-lead" data-tip="Which way the order flow leans right now, for the next 10 to 60 seconds">—</span></div>
-        <div class="fx-lean" data-tip="Long when the book and trades lean up, short when they lean down. Only a short-term lean: it says nothing about where price goes after a minute or so.">
+        <div class="sec-h" data-act="toggle"><span class="cap" data-tip="What it's for: picking a papertrade side that's likelier to lose. You earn Paper by losing on papertrade while the Hyperliquid hedge makes it back, so you want papertrade on the wrong side of the next move. This reads Hyperliquid's order book and trades for which way price leans over the next 10 to 60 seconds. It's a short-term tilt only: it says nothing beyond about a minute.">${ICON_CHEVRON}Order flow</span><span class="cap-r fx-lead" data-tip="Which way the order flow leans right now, for the next 10 to 60 seconds">—</span></div>
+        <div class="fx-lean" data-tip="Price leaning up favours a papertrade short: it's likelier to lose (earning Paper) while its Hyperliquid long gains. Leaning down favours a papertrade long. A short-term tilt only, so it helps most when your papertrade order fills quickly.">
           <span class="fx-lean-v">—</span>
           <span class="fx-lean-t">—</span>
         </div>
         <div class="fx-regime" data-tip="How fast the market is moving: 10-minute volatility of 1-second moves. Calm, normal or wild. The order-flow read is least reliable when it's wild."><span class="lbl">Volatility</span><span class="regime">—</span></div>
+        <div class="fx-gauge-h"><span class="lbl" data-tip="Which way Hyperliquid's price leans, from −100 (down) to +100 (up), and the expected price 10, 30 and 60 seconds out. Green is up, red is down, grey is no clear lean.">Price lean</span></div>
         <div class="fx-gauge" data-tip="−100 to +100. Green = the book and trades lean up, red = down, grey = no clear lean."><div class="fx-track"><i class="fx-fill"></i><b class="fx-needle"></b></div><span class="fx-score">—</span></div>
         <div class="ladder" data-tip="Expected move and price in 10, 30 and 60 seconds according to the order-flow read"></div>
         <details class="fx-more">
@@ -121,7 +122,7 @@
         <div class="fx-note"></div>
       </section>
     </div>
-    <div class="foot"><span class="model">Hyperliquid public data</span><span class="err"></span><span class="meta">—</span></div>`;
+    <div class="foot"><a class="model" href="https://wayfinder.ai" target="_blank" rel="noopener" data-tip="Paper Route is built by Wayfinder. Market data comes from Hyperliquid's public feed.">Built by Wayfinder ↗</a><span class="err"></span><span class="meta">—</span></div>`;
   // one tooltip bubble for the whole panel: any element with data-tip (hedge-ui uses it too)
   const tip = document.createElement("div");
   tip.className = "tip";
@@ -268,7 +269,7 @@
       els.fill.style.width = "0";
       els.needle.style.left = "50%";
       els.ladder.hidden = true;
-      els.leanV.textContent = "No lean";
+      els.leanV.textContent = "No pick";
       els.leanV.className = "fx-lean-v";
       els.leanT.textContent = "No model for this market yet";
       els.note.textContent = "No published index weights for this market yet. The inputs are live, the combined lean isn't.";
@@ -276,16 +277,19 @@
     }
     const s = idx.score;
     const leadH = idx.horizons.find((h) => h.s === idx.lead);
-    // the plain answer to "long or short?": which side the next 10-60 s lean, if any
-    const leaning = Math.abs(s) < LEAN_AT ? null : s > 0 ? "long" : "short";
-    const fastest = shownHorizons(f)[0];
-    els.lead.textContent = leaning ? `Leans ${leaning}` : "No clear lean";
-    els.lead.className = `cap-r fx-lead ${leaning === "long" ? "up" : leaning === "short" ? "dn" : ""}`;
-    els.leanV.textContent = leaning ? `Leans ${leaning}` : "No clear lean";
-    els.leanV.className = `fx-lean-v ${leaning === "long" ? "up" : leaning === "short" ? "dn" : ""}`;
-    els.leanT.textContent = leaning
-      ? `Next ${fastest?.s ?? idx.lead}–60s${fastest ? ` · ${fmtBps(fastest.ret_bps)} bp expected` : ""}${f.provisional ? " · provisional" : ""}`
-      : `Too weak to call either way${f.provisional ? " · provisional" : ""}`;
+    // The play is to lose on papertrade (which earns Paper) while Hyperliquid wins, so the
+    // papertrade side to pick is the one against the lean: price leaning up → papertrade short.
+    const up = Math.abs(s) < LEAN_AT ? null : s > 0;
+    const ptSide = up === null ? null : up ? "short" : "long";
+    // coloured like papertrade's own buttons: short red, long green
+    const sideTone = ptSide === "long" ? "up" : ptSide === "short" ? "dn" : "";
+    els.lead.textContent = ptSide ? `Favours papertrade ${ptSide}` : "No clear pick";
+    els.lead.className = `cap-r fx-lead ${sideTone}`;
+    els.leanV.textContent = ptSide ? `Papertrade ${ptSide}` : "No clear pick";
+    els.leanV.className = `fx-lean-v ${sideTone}`;
+    els.leanT.textContent = up === null
+      ? `Price isn't leaning either way${f.provisional ? " · provisional" : ""}`
+      : `Price leans ${up ? "up" : "down"}, next 10–60s${f.provisional ? " · provisional" : ""}`;
     els.leanT.dataset.tip = leadH?.ic != null ? `IC ${leadH.ic.toFixed(2)} at ${idx.lead}s: how well this read has matched the next moves historically (0 = no skill, 1 = perfect)` : "";
     els.score.textContent = `${s >= 0 ? "+" : "−"}${Math.abs(s).toFixed(0)}`;
     els.score.className = `fx-score ${Math.abs(s) < LEAN_AT ? "" : s > 0 ? "up" : "dn"}`;
@@ -696,7 +700,7 @@
   connectPort();
 
   // ---------- interaction ----------
-  // order flow starts folded: it's an optional timing aid, so the hedge comes first
+  // order flow starts folded: it's an optional aid for picking a side
   const flowSec = hud.querySelector("section.flow");
   chrome.storage.local.get({ hudPos: null, hudCollapsed: false, overlayEnabled: true, flowOpen: false }).then((s) => {
     if (s.hudPos) Object.assign(hud.style, { left: `${s.hudPos.left}px`, top: `${s.hudPos.top}px` });
