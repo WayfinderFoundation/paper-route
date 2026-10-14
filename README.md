@@ -6,8 +6,6 @@
 
 - **Tether**: holds the opposite position on Hyperliquid for exactly as long as your papertrade position exists.
   It follows papertrade's *fills*, not your clicks, so queued orders never leave you one-sided.
-- **Stop and take profit** on papertrade, which has neither: open both legs now or at a set time, and Paper Route
-  closes both at your levels.
 - **Safety net**: if papertrade liquidates you while your browser is closed, Hyperliquid closes the hedge at the
   same price.
 - **Order-flow overlay**: a live read of Hyperliquid's order book and trades, drawn on papertrade's chart.
@@ -53,38 +51,36 @@ panel appears on the trade page; drag it anywhere, collapse it, or hide it with 
 
 ## Set up hedging
 
-Open Paper Route's settings (click its toolbar icon):
+Click the Paper Route toolbar icon to open its settings, then **1 · Connect Hyperliquid**:
 
-1. **Hedge wallet**: your Hyperliquid account address. The papertrade wallet is picked up from the account
-   you're signed in with on papertrade (or type one in).
-2. **Main key**: the Hyperliquid account's private key, or a [Wayfinder](https://wayfinder.ai) API key for a
-   strategy/policy wallet. It's encrypted with your passphrase in the extension's storage and is only needed
-   for transfers and one-time approvals. You can keep it unlocked for 1 hour up to 7 days.
-3. **Create trading key**: generates a Hyperliquid API wallet inside the extension and approves it with your
-   main key. It can place orders and set leverage but **cannot withdraw or transfer**, so it stays ready
-   without a passphrase. Hyperliquid expires it after 180 days (create a new one then), and you can revoke it
-   any time on Hyperliquid's API page.
-4. Back on papertrade, pick the Hyperliquid leverage in the panel, then turn on **Tether** or open a round.
+1. Paste the private key of the Hyperliquid wallet you'll hedge with (or pick **Wayfinder API key** and add its
+   wallet address).
+2. Click **Connect**.
 
-The market follows the papertrade page: `/trade/btc` hedges BTC, `/trade/eth` hedges ETH. While a round
-is running, or Tether is holding an open position, Paper Route stays on that coin until it's flat.
+That's it. Paper Route works out the wallet from the key and uses the key once to approve a **trading key** on
+your Hyperliquid account (an API wallet that can place orders but **can't withdraw or transfer**), plus the
+builder fee. Then it forgets your key: nothing that can withdraw is saved. You'll only paste the key again to
+send USDC from Hyperliquid to papertrade, or to reconnect after 180 days. Your papertrade account is picked up
+from the one you're signed in to on papertrade. The two can be the same wallet.
+
+Back on papertrade, pick the Hyperliquid leverage in the panel, then turn on **Tether** (connecting turns it on for you).
+If a trade is too small for papertrade's minimum, the panel says what to change (usually a higher Hyperliquid
+leverage, or more USDC).
+
+The market follows the papertrade page: `/trade/btc` hedges BTC, `/trade/eth` hedges ETH. While Tether is
+holding an open position, Paper Route stays on that coin until it's flat.
 
 ## Keep it running
 
-Everything Paper Route manages (stops, take profits, scheduled rounds, Tether) runs **in your browser**. While a
-round is open or Tether is holding a position:
+Tether runs **in your browser**. While it's holding a position:
 
 - **Keep Chrome open and Paper Route enabled.** The toolbar icon shows **ON** and the panel shows an amber banner
-  while Paper Route is responsible for positions. Closing or reloading the papertrade tab asks you to confirm.
-- **The papertrade tab can be closed** as long as Chrome is open: when a stop, take profit or scheduled open comes
-  due, Paper Route opens papertrade in a background tab and acts there (papertrade stays signed in). Leaving a
-  papertrade tab open, and visible, is still faster: Chrome slows down background tabs.
-- **If Chrome is closed, the laptop sleeps or the extension is off, nothing is watched.** Both legs stay open,
-  so you remain hedged, but no stop or take profit fires and papertrade's bust is the only stop on that side.
-  If papertrade does bust, the [safety net](#safety-net) closes the hedge on Hyperliquid at the same price.
-  When Paper Route comes back it checks Hyperliquid's 1-minute candles for the time it was away; if a level
-  traded meanwhile it closes the round straight away and tells you. A scheduled round whose open time passed
-  while it was off is skipped, not opened late.
+  while Paper Route is responsible for positions.
+- **Tether works without the papertrade tab** as long as Chrome is open: it watches papertrade's account and your
+  Hyperliquid account from the extension's background.
+- **If Chrome is closed, the laptop sleeps or the extension is off, nothing is watched.** Both legs stay open, so
+  you remain hedged, but nothing rebalances. If papertrade liquidates the position meanwhile, the
+  [safety net](#safety-net) closes the hedge on Hyperliquid at the same price.
 
 ## Update
 
@@ -93,7 +89,7 @@ round is open or Tether is holding a position:
    copy and **Load unpacked** the new one instead.
 3. Refresh papertrade.
 
-The extension ID is fixed, so your encrypted key, trading key, settings and saved rounds carry over either way.
+The extension ID is fixed, so your encrypted key, trading key, settings and saved trades carry over either way.
 Don't load two versions at once.
 
 ## Features in detail
@@ -107,20 +103,6 @@ lose with. Paper Route holds the opposite position on Hyperliquid, so the pair i
 - a queued papertrade open is not a position yet, so Hyperliquid waits for it to land;
 - a queued papertrade close keeps you exposed, so the Hyperliquid leg stays on until the close fills;
 - if the hedge drifts by more than your band (e.g. you trade papertrade by hand), it trues it up.
-
-### Rounds: stop and take profit
-
-Open a papertrade position *now* or *at a set time* with a stop and a take profit, each 0.1 / 0.2 / 0.35 / 1 %,
-any custom % from papertrade's fill price, or off. The Hyperliquid leg opens when the papertrade open fills and
-closes when the papertrade close fills.
-
-Papertrade has no stop or take-profit orders, so **these levels are not placed on either exchange**. Paper Route
-watches Hyperliquid's mid (which papertrade tracks to under 1 bp) and, when a level is hit, clicks papertrade's
-own Close button. See [Keep it running](#keep-it-running). A level is a trigger, not a price guarantee: the close
-fills at whatever papertrade gives after its queue.
-
-Rounds are saved and pick up where they left off after a dropped stream, an API error or a browser restart.
-A click whose reply was lost is never sent twice, and a queued order is never re-sent.
 
 ### Safety net
 
@@ -146,7 +128,7 @@ A panel and chart layer built only from Hyperliquid's public websocket (order bo
 funding): the components (microprice, book imbalance, order-flow imbalance, taker flow, momentum, open-interest
 change, mark vs mid), a volatility regime, and a combined **order-flow index** with its expected move over the
 next 10–60 s drawn on the chart. See [Does it work?](#does-it-work) for how much that's worth. The chart also shows
-your round's entry, stop and take profit, papertrade's bust price and Hyperliquid's liquidation price.
+papertrade's bust price and Hyperliquid's liquidation price.
 
 ### Fees
 
@@ -161,7 +143,7 @@ git clone https://github.com/WayfinderFoundation/paper-route.git
 cd paper-route
 npm ci
 npm run build          # dev build into dist/; load the repo folder unpacked (auto-reloads on file changes)
-npm test               # offline tests: round state machine, capacity maths, order idempotency, flow features
+npm test               # offline tests: hedged-trade state machine, capacity maths, order idempotency, flow features
 npm run build:release  # release/paper-route-<version>.zip (refuses to package anything that looks like a key)
 ```
 
@@ -224,7 +206,6 @@ index to about 1e-4. Formulas are at the top of `src/flowindex.js`; weights are 
 | File | Role |
 |---|---|
 | `src/hedge.js` | Hedge engine: papertrade account stream, Hyperliquid account polling, tether, rebalancing, key handling |
-| `src/rounds.js` | Round state machine: `scheduled → opening → hedging → live → closing → flattening → done` |
 | `src/papertrade.js` | Papertrade public endpoints: account stream, trading limits, open-interest room, win fee, deposit address |
 | `src/hl.js` | Hyperliquid client: idempotent orders (cloid + status check), leverage, transfers, approvals |
 | `src/capacity.js` | Max size both venues can carry |
@@ -235,24 +216,21 @@ index to about 1e-4. Formulas are at the top of `src/flowindex.js`; weights are 
 
 Papertrade has no trading API you can sign for, so orders are placed by filling in papertrade's own order ticket
 and clicking its buttons in your signed-in tab. Keep a papertrade tab open (and preferably visible: Chrome
-throttles hidden tabs) while a round or Tether is running.
+throttles hidden tabs) while Tether is running.
 
 ## Risks
 
 - **Papertrade queue.** Opens and closes can wait minutes. While a close is queued you hold both the papertrade
-  side and the hedge, so you stay neutral, but a stop fills only when the queue gets to it.
+  side and the hedge, so you stay neutral until it fills.
 - **Safety-net edge cases.** Hyperliquid triggers on its mark price, papertrade busts on Hyperliquid's mid at its
-  block time. At the very edge one can happen without the other; with Chrome open, Tether or the round re-hedges
+  block time. At the very edge one can happen without the other; with Chrome open, Tether re-hedges
   straight away, with Chrome closed the pair stays one-sided until you're back.
 - **Liquidation mismatch.** Papertrade busts at about `1/leverage` from entry; Hyperliquid liquidates at its own
   margin level. Keep Hyperliquid's liquidation well beyond papertrade's bust (the HUD shows both and a
   suggested balance).
-- **Browser dependence.** Hedging, stops and take profits run in your browser. See
-  [Keep it running](#keep-it-running).
-- **A failed round.** If papertrade drops or never fills a round's open, the round fails without touching
-  Hyperliquid. If that open lands later anyway, only Tether (when it's on) will hedge it.
-- **Keys.** Your main key is encrypted with your passphrase; anyone with your unlocked browser profile can use it
-  for the unlock window. The trading key can trade but not withdraw.
+- **Browser dependence.** Hedging runs in your browser. See [Keep it running](#keep-it-running).
+- **Keys.** Your wallet key isn't stored. The trading key is kept in the extension (sealed to this browser); it
+  can trade on your Hyperliquid account but can't withdraw. Revoke it on Hyperliquid's API page if needed.
 - **Index.** The order-flow index is a short-horizon statistical lean, not a signal that covers fees on its own.
 
 ## License

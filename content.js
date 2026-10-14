@@ -91,30 +91,64 @@
       </div>
       <svg class="grip" viewBox="0 0 16 6"><circle cx="2" cy="1.5" r="1"/><circle cx="8" cy="1.5" r="1"/><circle cx="14" cy="1.5" r="1"/><circle cx="2" cy="4.5" r="1"/><circle cx="8" cy="4.5" r="1"/><circle cx="14" cy="4.5" r="1"/></svg>
       <div class="head-r">
-        <span class="chip"><span class="dot"></span><span class="livetxt">Offline</span></span>
-        <button class="btn" data-act="chart" title="Toggle chart overlay">${ICON_CHART}</button>
-        <button class="btn" data-act="collapse" title="Collapse · Alt+W hides">${ICON_COLLAPSE}</button>
+        <span class="chip" data-tip="Hyperliquid market data feed. Live = updating 10 times a second."><span class="dot"></span><span class="livetxt">Offline</span></span>
+        <button class="btn" data-act="chart" data-tip="Show or hide the lines Paper Route draws on papertrade's chart">${ICON_CHART}</button>
+        <button class="btn" data-act="collapse" data-tip="Collapse the panel. Alt+W hides it completely.">${ICON_COLLAPSE}</button>
       </div>
     </div>
     <div class="body">
       <div class="ref">
         <div class="ref-l">
-          <span class="mkt-row"><b class="mkt">—</b><span class="tag">Hyperliquid mid</span></span>
+          <span class="mkt-row" data-tip="Hyperliquid's mid price. Papertrade fills at this price, so it's the price your stops and take profits use."><b class="mkt">—</b><span class="tag">Hyperliquid mid</span></span>
           <span class="px">—</span>
         </div>
-        <div class="stat"><span class="lbl">Regime</span><span class="regime">—</span></div>
+        <div class="stat" data-tip="How fast the market is moving: 10-minute volatility of 1-second moves. Calm, normal or wild. The order-flow read is least reliable when it's wild."><span class="lbl">Regime</span><span class="regime">—</span></div>
       </div>
       <section class="flow">
-        <div class="sec-h"><span class="cap">Order flow</span><span class="cap-r fx-lead">—</span></div>
-        <div class="fx-gauge"><div class="fx-track"><i class="fx-fill"></i><b class="fx-needle"></b></div><span class="fx-score">—</span></div>
-        <div class="ladder"></div>
-        <div class="fx-comps"></div>
+        <div class="sec-h"><span class="cap" data-tip="A live read of Hyperliquid's order book and trades. It leans toward which way the next few seconds of price are likelier to go. It's small (about 1 bp at its strongest) and isn't a trading signal on its own.">Order flow ⓘ</span><span class="cap-r fx-lead" data-tip="IC = how well this read has matched the next moves historically (0 = no skill, 1 = perfect)">—</span></div>
+        <div class="fx-gauge" data-tip="−100 to +100. Green = the book and trades lean up, red = down, grey = no clear lean."><div class="fx-track"><i class="fx-fill"></i><b class="fx-needle"></b></div><span class="fx-score">—</span></div>
+        <div class="ladder" data-tip="Expected move and price in 10, 30 and 60 seconds according to the order-flow read"></div>
+        <details class="fx-more">
+          <summary data-tip="The order-book and trade readings the index is built from">See more <span class="hx-chev">›</span></summary>
+          <div class="fx-comps"></div>
+        </details>
         <div class="fx-note"></div>
       </section>
     </div>
     <div class="foot"><span class="model">Hyperliquid public data</span><span class="err"></span><span class="meta">—</span></div>`;
-  root.append(style, overlay, hud);
+  // one tooltip bubble for the whole panel: any element with data-tip (hedge-ui uses it too)
+  const tip = document.createElement("div");
+  tip.className = "tip";
+  tip.hidden = true;
+  root.append(style, overlay, hud, tip);
   document.documentElement.append(host);
+
+  let tipFor = null;
+  function showTip(target) {
+    const text = target?.dataset.tip;
+    if (!text) return hideTip();
+    tipFor = target;
+    tip.textContent = text;
+    tip.hidden = false;
+    const r = target.getBoundingClientRect();
+    const t = tip.getBoundingClientRect();
+    const left = Math.max(8, Math.min(window.innerWidth - t.width - 8, r.left + r.width / 2 - t.width / 2));
+    const below = r.bottom + 8 + t.height < window.innerHeight;
+    tip.style.left = `${left}px`;
+    tip.style.top = `${below ? r.bottom + 8 : r.top - t.height - 8}px`;
+  }
+  function hideTip() {
+    tipFor = null;
+    tip.hidden = true;
+  }
+  hud.addEventListener("mouseover", (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (t !== tipFor) showTip(t);
+  });
+  hud.addEventListener("mouseleave", hideTip);
+  hud.addEventListener("focusin", (e) => showTip(e.target.closest("[data-tip]")));
+  hud.addEventListener("focusout", hideTip);
+  hud.addEventListener("pointerdown", hideTip);
 
   const $ = (sel) => hud.querySelector(sel);
   const els = {
@@ -159,7 +193,7 @@
     for (const c of COMPONENTS) {
       const k = c.keys.find((x) => used.includes(x)) ?? c.keys[0];
       const row = el("div", "fx-c");
-      row.title = c.hint;
+      row.dataset.tip = c.hint;
       const name = el("span", "fx-cn", c.label);
       const win = WINDOW_OF(k);
       if (win) name.append(el("small", null, ` ${win}`));
@@ -200,7 +234,8 @@
     els.px.textContent = int;
     els.px.append(el("span", "c", `.${cents}`));
 
-    els.regime.textContent = f.regime ? `${f.regime} · ${f.x.vol_600s.toFixed(2)} bp` : "warming up";
+    const left = f.warmLeftS ? `${Math.max(1, Math.ceil(f.warmLeftS / 60))}m` : "";
+    els.regime.textContent = f.regime ? `${f.regime} · ${f.x.vol_600s.toFixed(2)} bp` : `Warming · ${left || "…"}`;
     els.regime.className = `regime ${f.regime === "wild" ? "dn" : f.regime === "calm" ? "up" : ""}`;
 
     const idx = f.index;
@@ -255,7 +290,7 @@
       r.fill.style.transform = `scaleX(${Math.max(0.04, Math.min(1, Math.abs(h.ret_bps) / scale))})`;
     }
     els.note.textContent = !f.warm
-      ? "Warming up: taker flow and the volatility regime need 10 minutes of data."
+      ? `Warming up: taker flow and the regime need 10 minutes of live data (${f.warmLeftS ? `${Math.ceil(f.warmLeftS / 60)} min left` : "starting"}).`
       : f.provisional
         ? "ETH uses BTC's weights re-scaled to ETH; its own fit needs more ETH history."
         : "";
@@ -573,6 +608,11 @@
   }
   setInterval(renderStatus, 250);
 
+  // remember whether "See more" is open
+  const more = hud.querySelector(".fx-more");
+  chrome.storage.local.get("fxMoreOpen").then(({ fxMoreOpen }) => (more.open = !!fxMoreOpen));
+  more.addEventListener("toggle", () => chrome.storage.local.set({ fxMoreOpen: more.open }));
+
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.type !== "wf-pt-map") return;
     state.map = e.data;
@@ -591,10 +631,12 @@
     try {
       port = chrome.runtime.connect({ name: "wf-pr-market" });
     } catch {
-      // "Extension context invalidated": the extension was reloaded, so load the new copy.
-      // Wait for Chrome to finish restarting it, or the reloaded page gets no content scripts.
+      // "Extension context invalidated": the extension was reloaded or updated, so this copy is dead.
+      // Swap the panel for a reload button, and reload by itself once Chrome has had time to restart
+      // the extension (too early and the reloaded page comes up without the panel).
       host.remove();
-      setTimeout(() => location.reload(), 1500);
+      showUpdated();
+      setTimeout(() => location.reload(), 4000);
       return;
     }
     state.coin = null;
@@ -610,6 +652,16 @@
       port = null;
       setTimeout(connectPort, 500);
     });
+  }
+
+  function showUpdated() {
+    if (document.getElementById("paper-route-updated")) return;
+    const b = document.createElement("button");
+    b.id = "paper-route-updated";
+    b.textContent = "Paper Route was updated · Reload";
+    b.style.cssText = "position:fixed;left:16px;top:16px;z-index:2147483647;padding:8px 14px;border:0;border-radius:10px;font:500 13px system-ui,sans-serif;color:#0b1a12;background:#9be89b;box-shadow:0 8px 24px -8px rgba(0,0,0,.5);cursor:pointer";
+    b.addEventListener("click", () => location.reload());
+    document.documentElement.append(b);
   }
 
   // papertrade is a single-page app; switching /trade/btc → /trade/eth re-subscribes

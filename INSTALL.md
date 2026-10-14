@@ -4,10 +4,9 @@
    here, so don't delete it.
 2. Open `chrome://extensions`, switch on **Developer mode** (top right) and click **Load unpacked**. Pick this
    folder (the one containing `manifest.json`).
-3. Pin Paper Route from Chrome's puzzle-piece menu and click it to open the settings:
-   - **Hedge wallet**: your Hyperliquid address.
-   - **Main key**: the Hyperliquid account's private key (or a Wayfinder API key), with a passphrase.
-   - **Create trading key**: an API wallet that can trade but can't withdraw.
+3. Pin Paper Route from Chrome's puzzle-piece menu and click it. Under **1 · Connect Hyperliquid**, paste the
+   private key of the Hyperliquid wallet you'll hedge with and click **Connect**. Paper Route sets up a trading
+   key (trades, can't withdraw) and forgets your key.
 4. Open https://exchange.papertrade.xyz/trade/btc (or `/trade/eth`), sign in, and use the HUD.
 
 ## Keep it running

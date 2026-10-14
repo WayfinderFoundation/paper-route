@@ -1,6 +1,4 @@
-// Capacity maths: hand-checked cases + parity between the worker (src/capacity.js) and the
-// HUD's copy in hedge-ui.js. Offline. Run: node test/capacity.mjs
-import { readFileSync } from "node:fs";
+// Capacity maths: hand-checked cases. Offline. Run: node test/capacity.mjs
 import { roundCapacity, bustDistance, HL_COST_FRACTION } from "../src/capacity.js";
 import { sideRoomUsd } from "../src/papertrade.js";
 
@@ -38,7 +36,8 @@ const base = { ptLimits: { ...limits, sideRoomUsd: 250e6 }, hlMaxLeverage: 40, m
 // 4. not enough for papertrade's minimum notional → refused with the reason
 {
   const c = roundCapacity({ ...base, isPaperLong: true, ptLeverage: 100, hedge: true, ptAvailable: 1660, hlAvailableToTrade: [500, 500], hlLeverage: 10 });
-  check(!c.ok && /min notional/.test(c.problems[0]), `too small to place: "${c.problems[0]}"`);
+  // $500 free covers $10,000 only from 1 / (500/10000 − 0.001) ≈ 20.4x, so the fix is 40x
+  check(!c.ok && /\$10,000 minimum/.test(c.problems[0]) && /Pick 40x/.test(c.problems[0]), `too small, with the fix: "${c.problems[0]}"`);
 }
 
 // 5. unhedged round ignores HL; user cap binds
@@ -58,30 +57,6 @@ check(near(bustDistance(100, limits.bustBuffer) * 100, 0.9524, 0.0001) && near(b
   const roomShort = sideRoomUsd(l, false, 80_000); // unlimited cap → bounded by long OI + $250M net
   check(near(roomLong, 240_000, 1), `long room = (5 − 2) BTC × $80,000 = $${roomLong.toLocaleString()}`);
   check(near(roomShort, 250_000_000 + 160_000, 1), `short room = 2 BTC long OI + $250M net = $${roomShort.toLocaleString()}`);
-}
-
-// 8. parity: the HUD's copy gives identical results on random inputs
-{
-  const src = readFileSync(new URL("../hedge-ui.js", import.meta.url), "utf8");
-  const start = src.indexOf("  const HL_COST_FRACTION");
-  const end = src.indexOf("  // the form's side");
-  const uiRoundCapacity = new Function(`${src.slice(start, end)}; return roundCapacity;`)();
-  let mismatches = 0;
-  for (let i = 0; i < 2000; i++) {
-    const isPaperLong = Math.random() < 0.5;
-    const ptLeverage = [5, 10, 50, 100, 198, 500, 1200][i % 7];
-    const hedge = Math.random() < 0.7;
-    const ptAvailable = Math.random() * 3000;
-    const hl = [Math.random() * 3000, Math.random() * 3000];
-    const hlLeverage = [3, 5, 10, 20, 40, 50][i % 6];
-    const roomLong = Math.random() * 1e6;
-    const roomShort = Math.random() * 1e6;
-    const caps = { maxOrderUsd: Math.random() * 50_000, maxPositionUsd: Math.random() * 80_000 };
-    const worker = roundCapacity({ ...base, ...caps, ptLimits: { ...limits, sideRoomUsd: isPaperLong ? roomLong : roomShort }, isPaperLong, ptLeverage, hedge, ptAvailable, hlAvailableToTrade: hl, hlLeverage });
-    const ui = uiRoundCapacity({ ...caps, ptAvailable, hlAvailableToTrade: hl, hlLeverage, hlMaxLeverage: 40, ptLimits: { ...limits, roomLongUsd: roomLong, roomShortUsd: roomShort } }, isPaperLong, ptLeverage, hedge);
-    if (worker.maxMargin !== ui.maxMargin || worker.minMargin !== ui.minMargin || worker.ok !== ui.ok || worker.binding !== ui.binding) mismatches++;
-  }
-  check(mismatches === 0, `HUD and worker agree on 2,000 random cases (${mismatches} mismatches)`);
 }
 
 console.log(failures ? `\n${failures} FAILED` : "\nALL PASS");

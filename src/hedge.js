@@ -172,7 +172,7 @@ export function createHedgeEngine({ publish, exec }) {
     const bustDist = pt.bust ? Math.abs(pt.bust / acct.mid - 1) : 1 / 200;
     const hlNotional = Math.max(Math.abs(acct.size), Math.abs(pt.netSize)) * acct.mid;
     const hlRequired = hlNotional * bustDist * settings.marginK;
-    const hlEquity = acct.accountValue + (state.hl.abstraction === "default" ? acct.spotUsdc : 0);
+    const hlEquity = acct.equity;
     const hlExcess = hlEquity - hlRequired;
     const ptShort = settings.roundMarginUsd - pt.available;
     if (ptShort > 1 && hlExcess > 1) return { direction: "toPapertrade", amount: Math.floor(Math.min(ptShort, hlExcess)), hlRequired, hlExcess };
@@ -205,32 +205,46 @@ export function createHedgeEngine({ publish, exec }) {
 
   async function ensureBuilderFeeApproved() {
     if (!settings.builderFee || (await hl.builderFeeApproved(settings.hedgeWallet))) return;
-    if (!(await getSecret())) throw new Error("Unlock your main key once to approve the Wayfinder builder fee (or turn it off in settings)");
+    if (!(await getSecret())) throw new Error("The builder fee isn't approved yet: reconnect in settings (or turn the fee off there)");
     await hl.approveBuilderFee(await mainSigner());
   }
 
   // One-time setup: generate an agent key here, approve it from the hedge wallet. The agent can
   // trade but never withdraw/transfer, so it's kept unlocked permanently (device-key sealed).
-  async function setupAgent() {
-    if (!hl) throw new Error("Set the papertrade and hedge wallets first");
+  // `main`: the wallet's own signer, when the user just pasted their key (Connect); otherwise the vault
+  async function setupAgent(main = null) {
+    if (!settings.hedgeWallet) throw new Error("Add your Hyperliquid hedge wallet first");
+    // works before papertrade is open too: only Hyperliquid is involved
+    const client = hl ?? createHl();
     return run("Setting up trading key", async () => {
-      const main = await mainSigner();
+      main ??= await mainSigner();
       const privateKey = generatePrivateKey();
       const { address } = privateKeyToAccount(privateKey);
       const validUntil = Date.now() + AGENT_VALID_DAYS * 86400_000;
-      await hl.approveAgent(main, { agentAddress: address, name: AGENT_NAME, validUntil });
+      await client.approveAgent(main, { agentAddress: address, name: AGENT_NAME, validUntil });
       await storeAgent({ privateKey, address, hedgeWallet: settings.hedgeWallet, network: settings.network, validUntil });
-      if (settings.builderFee && !(await hl.builderFeeApproved(settings.hedgeWallet))) await hl.approveBuilderFee(main);
+      if (settings.builderFee && !(await client.builderFeeApproved(settings.hedgeWallet))) await client.approveBuilderFee(main);
       state.vault = await vaultStatus();
       alert("ok", `Trading key ${address.slice(0, 8)}… approved until ${new Date(validUntil).toLocaleDateString()}`);
       return { address, validUntil };
     });
   }
 
+  // What the account is worth, and what could leave it. Unified / portfolio-margin accounts keep their
+  // USDC in spot: flat, perps reads $0; with a position, perps mirrors the same USDC (spot shows it all
+  // as held), so summing the two would double-count. Standard accounts keep them separate.
+  function withTotals(acct) {
+    if (state.hl.abstraction === "default") {
+      return { ...acct, equity: acct.accountValue + acct.spotUsdcTotal, outable: acct.withdrawable + acct.spotUsdc };
+    }
+    const equity = Math.max(acct.accountValue, acct.spotUsdcTotal);
+    return { ...acct, equity, outable: Math.max(0, equity - acct.marginUsed) };
+  }
+
   async function refreshHl() {
     if (!hl || !settings.hedgeWallet) return;
     try {
-      state.hl.account = await hl.account(settings.hedgeWallet, settings.coin);
+      state.hl.account = withTotals(await hl.account(settings.hedgeWallet, settings.coin));
       state.hl.status = "live";
       state.hl.error = null;
       tryResumeAuto();
@@ -427,14 +441,16 @@ export function createHedgeEngine({ publish, exec }) {
   }
 
   async function refreshHlQuiet() {
-    state.hl.account = await hl.account(settings.hedgeWallet, settings.coin);
+    state.hl.account = withTotals(await hl.account(settings.hedgeWallet, settings.coin));
     state.hl.status = "live";
   }
 
-  async function sendToPapertrade(amount) {
+  // `secret` ({mode, secret}): a key pasted for this one transfer, used and dropped
+  async function sendToPapertrade(amount, secret = null) {
     return run("Sending to papertrade", async () => {
       if (!(amount > 0)) throw new Error("Amount must be positive");
-      const s = await mainSigner(); // transfers are user-signed; the trading key can't move funds
+      // transfers are user-signed; the trading key can't move funds
+      const s = secret ? buildSigner(secret, settings.hedgeWallet) : await mainSigner();
       await refreshHlQuiet();
       const acct = state.hl.account;
       // unified/portfolio accounts spend spot USDC as collateral; default accounts keep perp
@@ -481,8 +497,7 @@ export function createHedgeEngine({ publish, exec }) {
     if (addr === sessionWallet) return;
     sessionWallet = addr;
     await chrome.storage.local.set({ ptSessionWallet: addr });
-    // only matters when settings don't name a wallet; then reconnect papertrade as that account
-    if (!lastNext.ptWallet) await configure(lastNext);
+    await configure(lastNext); // signed in as a different papertrade account: follow it
   }
 
   // The coin follows the papertrade page (/trade/btc, /trade/eth), but a round that's still
@@ -541,10 +556,9 @@ export function createHedgeEngine({ publish, exec }) {
     await (roundsReady ??= rounds.init());
     settings = { ...HEDGE_DEFAULTS, ...next, network: "mainnet" }; // papertrade runs on mainnet prices only
     settings.coin = rounds.lockedCoin() ?? pageCoin ?? settings.coin;
-    if (!settings.ptWallet && sessionWallet) {
-      settings.ptWallet = sessionWallet;
-      settings.ptWalletFromSession = true;
-    }
+    // always the account signed in on papertrade (an override saved by an older version is ignored)
+    settings.ptWallet = sessionWallet ?? "";
+    settings.ptWalletFromSession = true;
     state.auto = false;
     stopKeepAlive();
     const { tether } = await chrome.storage.local.get("tether");
@@ -629,9 +643,9 @@ export function createHedgeEngine({ publish, exec }) {
   async function scheduleRound(spec) {
     await (roundsReady ??= rounds.init());
     if (!hl) throw new Error("Set the papertrade and hedge wallets first");
-    if (spec.hedge && !(await canTrade())) throw new Error("Set up the trading key (or unlock the main key) to schedule a hedged round");
+    if (spec.hedge && !(await canTrade())) throw new Error("Set up the trading key (or unlock the main key) to open a hedged trade");
     if (spec.side !== "long" && spec.side !== "short") throw new Error("Pick long or short");
-    if (pageCoin && pageCoin !== settings.coin) throw new Error(`A ${settings.coin} round is running — finish it before trading ${pageCoin}`);
+    if (pageCoin && pageCoin !== settings.coin) throw new Error(`A ${settings.coin} hedged trade is running — finish it before trading ${pageCoin}`);
     // must fit both venues now
     const c = capacity(spec.side === "long", spec.ptLeverage, spec.hedge);
     if (!c.ok) throw new Error(c.problems[0]);

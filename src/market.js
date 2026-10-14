@@ -110,6 +110,7 @@ function tick(coin) {
         ask: row.ask_px,
         x: out.x,
         warm: out.warm,
+        warmLeftS: out.warmLeftS,
         regime: regimeOf(out.x.vol_600s, w),
         index: w ? scoreIndex(out.x, w) : null,
         provisional: !!w?.provisional,
@@ -126,7 +127,17 @@ function watch(coin) {
   else connect();
 }
 
+// A coin nobody is viewing keeps its windows for a while, so reloading papertrade or flipping
+// BTC ↔ ETH doesn't restart the 10-minute warm-up.
+const KEEP_UNWATCHED_MS = 120_000;
+let sweepTimer = null;
+
 function unwatchUnused() {
+  clearTimeout(sweepTimer);
+  sweepTimer = setTimeout(sweep, KEEP_UNWATCHED_MS);
+}
+
+function sweep() {
   const used = new Set(ports.values());
   for (const [coin, c] of coins) {
     if (used.has(coin)) continue;

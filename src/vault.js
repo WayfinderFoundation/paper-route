@@ -142,12 +142,14 @@ export async function forgetAgent() {
 }
 
 export async function vaultStatus() {
-  const { vault, unlocked, agent } = await chrome.storage.local.get(["vault", "unlocked", "agent"]);
+  const { vault, unlocked, agent, vaultLabel, connection } = await chrome.storage.local.get(["vault", "unlocked", "agent", "vaultLabel", "connection"]);
   const live = unlocked && Date.now() <= unlocked.until;
   let mode = null;
   if (live) mode = (await getSecret())?.mode ?? null;
   return {
     remembered: !!vault,
+    label: vault ? (vaultLabel ?? null) : null,
+    connection: connection ?? null,
     unlocked: !!live,
     unlockedUntil: live ? unlocked.until : null,
     mode,

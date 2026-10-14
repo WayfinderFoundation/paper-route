@@ -62,6 +62,9 @@ export function wayfinderSigner(apiKey, address) {
 
 export function buildSigner(secret, hedgeWallet) {
   if (secret.mode === "key") return localKeySigner(secret.secret, hedgeWallet);
-  if (secret.mode === "wayfinder") return wayfinderSigner(secret.secret, hedgeWallet);
+  if (secret.mode === "wayfinder") {
+    if (!hedgeWallet) throw new Error("A Wayfinder API key needs the hedge wallet address in settings");
+    return wayfinderSigner(secret.secret, hedgeWallet);
+  }
   throw new Error(`Unknown signer mode ${secret.mode}`);
 }

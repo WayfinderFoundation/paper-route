@@ -129,6 +129,7 @@ export function createFlowEngine() {
       burstFast: new Ewm(5),
       burstSlow: new Ewm(300),
       prev: null,
+      rows: 0,
     };
   }
   reset();
@@ -142,6 +143,7 @@ export function createFlowEngine() {
       return null; // in a gap: no features until the book comes back
     }
 
+    s.rows += 1;
     const { mid, bid_px: bid, ask_px: ask, bid_sz: bidSz, ask_sz: askSz } = row;
     const lnMid = Math.log(mid);
     s.lnMid.push(lnMid);
@@ -197,7 +199,9 @@ export function createFlowEngine() {
       vol_600s: s.r1[600].std(),
       burst_ratio: burst,
     };
-    return { x, warm: Number.isFinite(x.flowz_5s) && Number.isFinite(x.vol_600s) };
+    const warm = Number.isFinite(x.flowz_5s) && Number.isFinite(x.vol_600s);
+    // flowz_30s is the last window to fill: 600 s of 30 s sums, after the first 30 s
+    return { x, warm, warmLeftS: warm ? 0 : Math.max(0, (R(600) + R(30) - s.rows) * (TICK_MS / 1000)) };
   }
 
   return { step, reset };

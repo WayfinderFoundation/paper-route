@@ -303,7 +303,6 @@ section { padding: 10px 12px 12px; box-shadow: inset 0 1px 0 var(--line); }
 .fx-cv { text-align: right; font-variant-numeric: tabular-nums; }
 .fx-note { font-size: 12px; color: var(--muted); margin-top: 6px; }
 .fx-note:empty { display: none; }
-.hx-why { font-size: 12px; color: var(--muted); }
 .sc-when { flex-wrap: wrap; }
 .sc-when .sc-now { flex: none; }
 
@@ -317,3 +316,53 @@ section { padding: 10px 12px 12px; box-shadow: inset 0 1px 0 var(--line); }
 .hx-netline.up { color: var(--up); }
 .hx-netline.warn { color: var(--amber); }
 .hx-netline.dn { color: var(--down); }
+
+/* ---------- tooltips ---------- */
+.tip { position: fixed; z-index: 2147483647; max-width: 260px; padding: 8px 10px; border-radius: 9px; font: 400 12px/1.45 var(--font); color: var(--fg); background: #2a2a2d; box-shadow: 0 8px 24px -8px oklch(0 0 0 / 0.6), inset 0 0 0 1px oklch(1 0 0 / 0.08); pointer-events: none; white-space: normal; }
+[data-tip] { cursor: help; }
+button[data-tip], label[data-tip], input[data-tip] { cursor: pointer; }
+.hx-status-t { font-size: 12px; line-height: 1.45; color: var(--muted); margin: -2px 0 10px; }
+.hx-status-t.up { color: var(--up); }
+.hx-status-t.warn { color: var(--amber); }
+.hx-status-t.dn { color: var(--down); }
+.badge.hx-status { cursor: help; }
+
+/* ---------- Hyperliquid account ---------- */
+.hla-h { cursor: pointer; }
+.hlacct.collapsed .hla-body { display: none; }
+.hlacct.collapsed .hla-h { margin-bottom: 0; }
+.hla-bal { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.hla-bal > div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10.5px; background: var(--surface-1); }
+.hla-bal .lbl { font-size: 12px; }
+.hla-bal b { font: 600 15px/1.2 var(--font-heading); }
+.hla-row { display: grid; grid-template-columns: 1.35fr 1.4fr 1.1fr 0.8fr; gap: 6px; align-items: center; min-height: 28px; padding: 0 6px; font-size: 12px; font-variant-numeric: tabular-nums; border-radius: 7px; }
+.hla-row > span:not(:first-child) { text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hla-head { color: var(--muted); min-height: 22px; }
+.hla-row.here { background: var(--surface-1); }
+.hla-coin { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hla-coin b { font-weight: 600; }
+.hla-empty, .hla-spot { font-size: 12px; color: var(--muted); }
+.hla-spot { margin-top: 8px; }
+.hla-spot:empty { display: none; }
+.hx-confirm .hx-xkey { width: 100%; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.hx-tether-on { width: 100%; height: 36px; margin: -4px 0 12px; }
+
+/* ---------- accounts & transfers dropdown ---------- */
+.hx-accts { border-radius: 10.5px; background: var(--surface-1); }
+.hx-accts > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; font-size: 12px; }
+.hx-accts > summary::-webkit-details-marker { display: none; }
+.hx-accts > summary .lbl { font-size: 13px; color: var(--fg); }
+.hx-accts-sum { flex: 1; text-align: right; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hx-chev { color: var(--muted); transition: transform 150ms var(--ease); }
+.hx-accts[open] .hx-chev { transform: rotate(90deg); }
+.hx-accts-b { display: flex; flex-direction: column; gap: 12px; padding: 0 12px 12px; }
+.hx-accts .hx-bal > div { background: var(--surface-2); }
+.hla-title { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.hla-title .lbl { font-size: 12px; }
+.hla-addr { font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+
+/* ---------- order flow: components behind "See more" ---------- */
+.fx-more > summary { list-style: none; display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.fx-more > summary::-webkit-details-marker { display: none; }
+.fx-more > summary:hover { color: var(--fg); }
+.fx-more[open] .hx-chev { transform: rotate(90deg); }
