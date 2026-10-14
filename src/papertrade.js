@@ -196,10 +196,21 @@ async function streamOnce(wallet, controller, { onFrame, onStatus, onActivity })
 // intake = [revision, minimumPaperStake, maximumNetOpenInterest, pausedActions[]]
 const UNLIMITED_CAP = (1n << 128n) - 1n;
 
-export async function tradingLimits(coin) {
+// every listed coin's limits from one request
+export async function tradingLimitsAll() {
   const res = await fetch(`${PT_BASE}/state/trading`, { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`papertrade trading state HTTP ${res.status}`);
   const s = await res.json();
+  return Object.fromEntries(Object.values(INSTRUMENTS).flatMap((coin) => (s.instruments.some((i) => i[1] === coin) ? [[coin, limitsFrom(s, coin)]] : [])));
+}
+
+export async function tradingLimits(coin) {
+  const res = await fetch(`${PT_BASE}/state/trading`, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`papertrade trading state HTTP ${res.status}`);
+  return limitsFrom(await res.json(), coin);
+}
+
+function limitsFrom(s, coin) {
   const t = s.instruments.find((i) => i[1] === coin);
   if (!t) throw new Error(`papertrade has no ${coin} market`);
   const [, , , priceScale, active, paused, retired, closeOnly] = t;

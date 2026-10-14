@@ -188,6 +188,8 @@
     .pr-chip img { width: 12px; height: 12px; border-radius: 3px; }
     .pr-chip .tp { color: #2f6b3f; } .pr-chip .sl { color: #8b2020; }
     .pr-chip.add { color: rgb(110, 102, 90); border-style: dashed; }
+    .pr-chip.off { color: #fff; background: #8b2020; border-color: #8b2020; }
+    .pr-offline { margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: #8b2020; color: #fff; font-size: 12px; font-weight: 600; }
   `;
   document.head.append(style);
 
@@ -221,7 +223,19 @@
   const tPending = document.createElement("div");
   tPending.className = "pr-pending";
   tPending.hidden = true;
-  ticket.append(tHead, tBody, tPending);
+  const tOffline = document.createElement("div");
+  tOffline.className = "pr-offline";
+  tOffline.hidden = true;
+  ticket.append(tHead, tOffline, tBody, tPending);
+  function renderOffline(s) {
+    const coin = location.pathname.match(/\/trade\/([a-z]+)/i)?.[1]?.toUpperCase();
+    tOffline.textContent = !s
+      ? "⚠ Paper Route is offline: no TP/SL is being watched. Reload it in chrome://extensions, then refresh this page."
+      : s.exits?.unwatched?.includes(coin)
+        ? `⚠ No ${coin} price for a while: TP/SL can't trigger until it's back (retrying).`
+        : "";
+    tOffline.hidden = !tOffline.textContent;
+  }
 
   chrome.storage.local.get("tpslTicketOn").then(({ tpslTicketOn }) => {
     tOn.checked = !!tpslTicketOn;
@@ -312,15 +326,25 @@
     }
     chip.dataset.id = id;
     chip.dataset.coin = coin;
-    const x = eng.snap()?.exits?.byPosition?.[id];
-    const key = x ? `${x.tpPx}|${x.slPx}|${x.state}` : "add";
+    const s = eng.snap();
+    // offline, or no price for this coin: say so rather than look like "nothing set"
+    const off = !s ? "Paper Route offline" : s.exits?.unwatched?.includes(coin) ? "TP/SL not watched" : null;
+    const x = s?.exits?.byPosition?.[id];
+    const key = off ? `off|${off}` : x ? `${x.tpPx}|${x.slPx}|${x.state}` : "add";
     if (chip.dataset.key === key) return;
     chip.dataset.key = key;
     chip.textContent = "";
     const img = document.createElement("img");
     img.src = ICON;
     chip.append(img);
-    chip.classList.toggle("add", !x);
+    chip.classList.toggle("add", !x && !off);
+    chip.classList.toggle("off", !!off);
+    if (off) {
+      chip.title = !s
+        ? "Paper Route's background isn't running, so no stop loss or take profit is being watched. Reload the extension in chrome://extensions, then refresh papertrade."
+        : `No ${coin} price has come in for a while, so its levels can't trigger. Paper Route keeps retrying.`;
+      return chip.append(`⚠ ${off}`);
+    }
     chip.title = x ? "Stop loss / take profit watched by Paper Route. Click to edit." : "Add a stop loss or take profit (watched by Paper Route)";
     if (!x) return chip.append("TP/SL");
     if (x.state === "closing") return chip.append(`Closing (${x.reason})…`);
@@ -420,7 +444,10 @@
   eng.onSnap((s) => {
     scanRows();
     renderPending(s);
+    renderOffline(s);
   });
+  // before the first snapshot arrives the worker may simply not be there
+  setTimeout(() => renderOffline(eng.snap()), 4000);
   setInterval(() => {
     tTp.sync();
     tSl.sync();

@@ -11,14 +11,14 @@
 
 ## Keep it running
 
-Stops, take profits, scheduled rounds and Tether run in your browser, not on papertrade or Hyperliquid. While the
+Stop losses, take profits and Tether (BTC and ETH at once) run in your browser, not on papertrade or Hyperliquid. While the
 toolbar icon shows **ON**, keep Chrome open and Paper Route enabled. The papertrade tab may be closed: Paper Route
-reopens it in the background when it needs to close or open something.
+reopens it in the background when it needs to close something.
 
 ## Updating
 
 Unzip the new release, then click the reload icon on Paper Route in `chrome://extensions` (or remove the old copy
-and Load unpacked the new folder). Your keys, settings and rounds carry over. Refresh papertrade afterwards.
+and Load unpacked the new folder). Your keys, settings and TP/SL levels carry over. Refresh papertrade afterwards.
 
 Full guide, fees, risks and how the hedge follows papertrade's queue:
 https://github.com/WayfinderFoundation/paper-route

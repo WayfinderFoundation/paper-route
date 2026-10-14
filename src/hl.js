@@ -41,38 +41,91 @@ async function take(weight) {
 export const budgetUsed = () => spent.filter(([t]) => Date.now() - t <= 60_000).reduce((a, [, w]) => a + w, 0);
 
 // ---------- one shared price feed ----------
-// Every watcher (Tether, TP/SL, the safety net) listens to the same allMids websocket instead of
-// opening its own, and reads of the mid use it while it's fresh instead of polling.
-const mids = { px: {}, at: 0, listeners: new Map(), sub: null, starting: null };
+// Every watcher (Tether, TP/SL, the safety net) shares one websocket. Prices come from each coin's
+// best bid/offer (bbo), which is what papertrade's own price follows; allMids lags it by 3–5 s, so
+// it's only used as a heartbeat (bbo pushes only when the top of book changes) and for coins
+// nobody is watching.
+const mids = { all: {}, bbo: {}, at: 0, listeners: new Map(), sub: null, starting: null, books: new Map() };
 
 function startMids() {
   if (mids.sub || mids.starting) return mids.starting;
   mids.starting = (async () => {
     const ws = new WebSocketTransport();
-    const sub = await new SubscriptionClient({ transport: ws }).allMids((e) => {
+    const client = new SubscriptionClient({ transport: ws });
+    const sub = await client.allMids((e) => {
       mids.at = Date.now();
-      for (const [c, v] of Object.entries(e.mids)) mids.px[c] = Number(v);
-      for (const [c, fns] of mids.listeners) {
-        const v = mids.px[c];
-        if (v > 0) for (const fn of fns) fn(v);
-      }
+      for (const [c, v] of Object.entries(e.mids)) mids.all[c] = Number(v);
     });
-    mids.sub = { sub, ws };
+    mids.sub = { sub, ws, client };
+    for (const [coin, fns] of mids.listeners) if (fns.size) watchBook(coin);
   })().finally(() => {
     mids.starting = null;
   });
   return mids.starting;
 }
 
-async function stopMidsIfUnused() {
-  if ([...mids.listeners.values()].some((s) => s.size) || !mids.sub) return;
+function watchBook(coin) {
+  if (!mids.sub || mids.books.has(coin)) return;
+  const { client } = mids.sub;
+  mids.books.set(coin, null); // subscribing
+  client
+    .bbo({ coin }, (e) => {
+      const [bid, ask] = e.bbo;
+      if (!bid || !ask) return;
+      const px = (Number(bid.px) + Number(ask.px)) / 2;
+      mids.bbo[coin] = px;
+      for (const fn of mids.listeners.get(coin) ?? []) fn(px);
+    })
+    .then(
+      (sub) => {
+        // the socket may have been replaced, or the coin dropped, while this subscribed
+        if (mids.books.get(coin) === null && mids.sub?.client === client) mids.books.set(coin, sub);
+        else sub.unsubscribe().catch(() => {});
+      },
+      () => mids.books.delete(coin),
+    );
+}
+
+async function unwatchBook(coin) {
+  const sub = mids.books.get(coin);
+  mids.books.delete(coin);
+  delete mids.bbo[coin];
+  await sub?.unsubscribe().catch(() => {});
+}
+
+async function closeMids() {
+  if (!mids.sub) return;
   const { sub, ws } = mids.sub;
   mids.sub = null;
+  mids.books.clear();
+  mids.bbo = {}; // prices from a dead socket can't be trusted
   await sub.unsubscribe().catch(() => {});
   await ws.close().catch(() => {});
 }
 
-const freshMid = (coin) => (Date.now() - mids.at < 3000 && mids.px[coin] > 0 ? mids.px[coin] : null);
+const hasListeners = () => [...mids.listeners.values()].some((s) => s.size);
+
+async function stopMidsIfUnused() {
+  if (!hasListeners()) await closeMids();
+}
+
+// The socket's own reconnect gives up after a few failures (sleep, network blip) and then stays
+// silent for good. allMids pushes every second or so; if nothing arrives for a while, start over.
+const MIDS_SILENT_MS = 10_000;
+setInterval(async () => {
+  if (!hasListeners() || mids.starting) return;
+  if (mids.sub && Date.now() - mids.at < MIDS_SILENT_MS) return;
+  await closeMids();
+  mids.at = Date.now(); // give the new socket a full window before judging it
+  startMids()?.catch(() => {});
+}, 2_000);
+
+// while the socket is alive an unchanged bbo is still the price; without one, the (lagging) allMids
+const freshMid = (coin) => {
+  if (Date.now() - mids.at >= 5000) return null;
+  const px = mids.bbo[coin] ?? mids.all[coin];
+  return px > 0 ? px : null;
+};
 
 export function createHl() {
   const transport = new HttpTransport({ timeout: 8000 });
@@ -119,40 +172,30 @@ export function createHl() {
     return Number(all[coin]);
   }
 
-  // `fresh`: also re-read leverage / available-to-trade (needed right before an order); otherwise
-  // that 20-weight read is reused for up to 15 s, and the mid comes from the shared websocket
-  async function account(user, coin, { fresh = false } = {}) {
-    const key = `${user}:${coin}`;
-    const cachedActive = assetData.get(key);
-    const needActive = fresh || !cachedActive || Date.now() - cachedActive.at > ASSET_DATA_MS;
-    const cachedMid = freshMid(coin);
-    const kinds = ["clearinghouseState", "spotClearinghouseState", ...(cachedMid ? [] : ["allMids"]), ...(needActive ? ["activeAssetData"] : [])];
-    const [perp, spot, allMids, active] = await read(
+  // The whole account in one read, for every coin Paper Route hedges: shared balances and positions
+  // (2 cheap requests), plus per coin the leverage / available-to-trade read (20 each), which is
+  // reused for up to 15 s unless that coin is in `fresh` (right before an order on it). Mids come
+  // from the shared websocket while it's fresh.
+  async function accounts(user, coins, { fresh = [] } = {}) {
+    const need = coins.filter((c) => fresh.includes(c) || !assetData.get(`${user}:${c}`) || Date.now() - assetData.get(`${user}:${c}`).at > ASSET_DATA_MS);
+    const cachedMids = Object.fromEntries(coins.map((c) => [c, freshMid(c)]));
+    const needMids = coins.some((c) => !cachedMids[c]);
+    const kinds = ["clearinghouseState", "spotClearinghouseState", ...(needMids ? ["allMids"] : []), ...need.map(() => "activeAssetData")];
+    const [perp, spot, allMids, ...actives] = await read(
       "account",
       () =>
         Promise.all([
           info.clearinghouseState({ user }),
           info.spotClearinghouseState({ user }),
-          cachedMid ? null : info.allMids(),
-          needActive ? info.activeAssetData({ user, coin }) : cachedActive.value,
+          needMids ? info.allMids() : null,
+          ...need.map((c) => info.activeAssetData({ user, coin: c })),
         ]),
       kinds,
     );
-    if (needActive) assetData.set(key, { at: Date.now(), value: active });
-    const midsNow = allMids ?? { ...mids.px, [coin]: cachedMid };
-    const pos = perp.assetPositions.map((p) => p.position).find((p) => p.coin === coin);
+    need.forEach((c, i) => assetData.set(`${user}:${c}`, { at: Date.now(), value: actives[i] }));
+    const midsNow = { ...mids.all, ...(allMids ?? {}), ...Object.fromEntries(Object.entries(cachedMids).filter(([, v]) => v)) };
     const usdc = spot.balances.find((b) => b.coin === "USDC");
-    return {
-      mid: Number(midsNow[coin]),
-      size: pos ? Number(pos.szi) : 0,
-      entry: pos ? Number(pos.entryPx) : null,
-      uPnl: pos ? Number(pos.unrealizedPnl) : 0,
-      funding: pos ? -Number(pos.cumFunding.sinceOpen) : 0, // cumFunding is paid; flip so + = received
-      liqPx: pos?.liquidationPx ? Number(pos.liquidationPx) : null,
-      // the account's leverage setting for this coin, which applies even with no position open
-      leverage: { value: active.leverage.value, isCross: active.leverage.type === "cross" },
-      // USDC margin free to open a [buy, sell] on this coin (already net of the open position)
-      availableToTrade: active.availableToTrade.map(Number),
+    const shared = {
       accountValue: Number(perp.marginSummary.accountValue),
       marginUsed: Number(perp.marginSummary.totalMarginUsed),
       withdrawable: Number(perp.withdrawable),
@@ -176,6 +219,34 @@ export function createHl() {
         .filter((b) => Number(b.total) > 0)
         .map((b) => ({ coin: b.coin, total: Number(b.total), hold: Number(b.hold), usd: b.coin === "USDC" ? Number(b.total) : Number(b.total) * Number(midsNow[b.coin] ?? midsNow[`@${b.token}`] ?? NaN) })),
     };
+    const byCoin = Object.fromEntries(
+      coins.map((c) => {
+        const pos = perp.assetPositions.map((p) => p.position).find((p) => p.coin === c);
+        const active = assetData.get(`${user}:${c}`).value;
+        return [
+          c,
+          {
+            mid: Number(midsNow[c]),
+            size: pos ? Number(pos.szi) : 0,
+            entry: pos ? Number(pos.entryPx) : null,
+            uPnl: pos ? Number(pos.unrealizedPnl) : 0,
+            funding: pos ? -Number(pos.cumFunding.sinceOpen) : 0, // cumFunding is paid; flip so + = received
+            liqPx: pos?.liquidationPx ? Number(pos.liquidationPx) : null,
+            // the account's leverage setting for this coin, which applies even with no position open
+            leverage: { value: active.leverage.value, isCross: active.leverage.type === "cross" },
+            // USDC margin free to open a [buy, sell] on this coin (already net of the open position)
+            availableToTrade: active.availableToTrade.map(Number),
+          },
+        ];
+      }),
+    );
+    return { shared, byCoin };
+  }
+
+  // one coin, flattened (kept for callers that only care about one)
+  async function account(user, coin, { fresh = false } = {}) {
+    const { shared, byCoin } = await accounts(user, [coin], { fresh: fresh ? [coin] : [] });
+    return { ...shared, ...byCoin[coin] };
   }
 
   async function openOrders(user, coin) {
@@ -319,13 +390,16 @@ export function createHl() {
     if (!mids.listeners.has(coin)) mids.listeners.set(coin, new Set());
     mids.listeners.get(coin).add(onMid);
     await startMids();
+    watchBook(coin);
     return async () => {
-      mids.listeners.get(coin)?.delete(onMid);
+      const fns = mids.listeners.get(coin);
+      fns?.delete(onMid);
+      if (!fns?.size) await unwatchBook(coin);
       await stopMidsIfUnused();
     };
   }
 
-  return { loadMeta, mid, account, openOrders, marketOrder, placeTrigger, placeBrackets, cancel, setLeverage, perpToSpot, sendUsdc, abstraction, priceRange, subscribeMid, builderFeeApproved, approveBuilderFee, approveAgent };
+  return { loadMeta, mid, account, accounts, openOrders, marketOrder, placeTrigger, placeBrackets, cancel, setLeverage, perpToSpot, sendUsdc, abstraction, priceRange, subscribeMid, builderFeeApproved, approveBuilderFee, approveAgent };
 }
 
 export function roundSize(size, szDecimals) {

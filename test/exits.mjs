@@ -46,6 +46,7 @@ function world() {
     readableCoins: () => (w.blind ? [] : ["BTC", "ETH"]),
     closeQueued: (id) => w.queued.has(id),
     ptLive: () => w.live,
+    mid: async (coin) => w.polled?.[coin] ?? null,
     subscribeMid: async (coin, fn) => {
       w.midFns[coin] = fn;
       return () => delete w.midFns[coin];
@@ -139,6 +140,37 @@ const pos = (id, extra = {}) => ({ id, coin: "BTC", isLong: false, entry: 80_000
   let refused = null;
   await x.set({ positionId: "20", tpPx: 79_900, slPx: null }).catch((e) => (refused = e.message));
   check(/already past/.test(refused ?? ""), `refused: ${refused}`);
+}
+
+{
+  console.log("\n# the price socket goes quiet: levels are checked against a fetched price");
+  const { w, ctx } = world();
+  store.exits = {};
+  store.pendingExit = null;
+  w.positions = [pos("40")];
+  const x = createExits(ctx);
+  await x.init();
+  await x.set({ positionId: "40", tpPx: 79_000, slPx: null });
+  await until(() => w.midFns.BTC, 500);
+  w.mid("BTC", 79_500); // one push, then silence
+  await sleep(600);
+  check(w.closes.length === 0, "nothing hit yet");
+  w.polled = { BTC: 78_900 };
+  check(await until(() => w.closes[0] === "40", 6000), "take profit hit on the fetched price, socket still silent");
+}
+
+{
+  console.log("\n# no price at all for a while: reported as unwatched");
+  const { w, ctx } = world();
+  store.exits = {};
+  w.positions = [pos("50")];
+  const x = createExits(ctx);
+  await x.init();
+  await x.set({ positionId: "50", tpPx: 79_000, slPx: null });
+  check(x.snapshot().unwatched.length === 0, "not flagged straight away");
+  check(await until(() => x.snapshot().unwatched.includes("BTC"), 10_000), "flagged once no price has arrived for 8 s");
+  w.mid("BTC", 79_500);
+  check(x.snapshot().unwatched.length === 0, "cleared by the next price");
 }
 
 console.log(failures ? `\n${failures} FAILED` : "\nALL PASS");

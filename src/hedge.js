@@ -1,23 +1,22 @@
-// Hedge engine: keeps the HL hedge wallet at -(papertrade net size) on the same coin.
-// Auto-hedge fails hard: any error, a down papertrade stream, or a failed HL read turns it
-// off and raises an alert rather than retrying.
+// Hedge engine: for every coin papertrade lists (a "lane"), keeps the Hyperliquid hedge wallet at
+// −(papertrade net size) on that coin. Lanes are independent (own Tether switch, leverage, safety
+// net); they share one papertrade account stream, one Hyperliquid account read, one price feed and
+// one order queue. The papertrade page only decides which lane the panel shows.
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { buildSigner, localKeySigner } from "./signers.js";
 import { getAgent, getSecret, storeAgent, vaultStatus } from "./vault.js";
 import { createHl, roundPrice, roundSize } from "./hl.js";
-import { decodePrice, depositProxy, positionsOf, sideRoomUsd, subscribeAccount, summarize, tradingLimits, winFeeRate } from "./papertrade.js";
+import { depositProxy, positionsOf, sideRoomUsd, subscribeAccount, summarize, tradingLimitsAll, winFeeRate } from "./papertrade.js";
 import { planSafetyNet } from "./safetynet.js";
-import { HL_COST_FRACTION, roundCapacity } from "./capacity.js";
 import { withRetry } from "./retry.js";
-import { createRounds } from "./rounds.js";
 import { createExits } from "./exits.js";
 
 export const INSTRUMENT_IDS = { BTC: 0, ETH: 1 };
+const COINS = Object.keys(INSTRUMENT_IDS);
 const AGENT_NAME = "paper-route"; // HL agent names are 1–16 chars; re-approving the same name replaces it
 const AGENT_VALID_DAYS = 180;
 
 export const HEDGE_DEFAULTS = {
-  coin: "BTC",
   ptWallet: "",
   hedgeWallet: "",
   network: "mainnet",
@@ -28,8 +27,9 @@ export const HEDGE_DEFAULTS = {
   builderFee: true,
   marginK: 3,
   roundMarginUsd: 100,
-  hlLeverage: 10,
+  hlLeverage: 10, // per-coin choices live in `leverage`; this is the default for a coin not set yet
   hlCross: true,
+  leverage: {}, // coin → { value, cross }
   safetyNet: true,
 };
 
@@ -40,37 +40,55 @@ const LIMITS_POLL_MS = 5000;
 const AUTO_STABLE_MS = 400;
 const AUTO_MIN_GAP_MS = 2000;
 const DEPOSIT_CONFIRM_TIMEOUT_MS = 90_000;
+// HL taker 4.5 bp + Wayfinder builder 2 bp + slippage headroom, as a fraction of notional
+const HL_COST_FRACTION = 0.001;
 // errors worth retrying rather than stopping Tether over
 const TRANSIENT = /fetch failed|failed to fetch|network|timed? ?out|timeout|ECONN|ENOTFOUND|socket|\b(429|5\d\d)\b|busy|temporarily/i;
 const NET_RETRY_MS = 5_000; // safety-net reconcile: soonest after the last attempt
 const NET_REFRESH_MS = 60_000; // …and at least this often even when nothing changed
 
-export function createHedgeEngine({ publish, exec }) {
+const newLane = (coin) => ({
+  coin,
+  auto: false, // Tether on for this coin
+  resume: false, // turn Tether back on once both feeds are live (after a restart)
+  summary: null, // papertrade, this coin (summarize)
+  account: null, // Hyperliquid: shared balances + this coin's position and margin
+  limits: null, // papertrade trading limits for this coin
+  pendingDelta: null,
+  lastOrderAt: 0,
+  keepAlive: null,
+  net: { orders: [], error: null, at: null }, // safety net
+  netBusy: false,
+  netAt: 0,
+  netKey: "",
+});
+
+const IO = { createHl, subscribeAccount, summarize, positionsOf, tradingLimitsAll, winFeeRate, depositProxy, getAgent, getSecret, storeAgent, vaultStatus };
+
+// `io` swaps the network and key-vault calls (tests)
+export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
+  const io = { ...IO, ...ioOverrides };
   let settings = { ...HEDGE_DEFAULTS };
   let hl = null;
-  let szDecimals = null;
+  let meta = null; // coin → { szDecimals, maxLeverage, … }
   let stopPt = null;
   let pollTimer = null;
+  let limitsTimer = null;
   let feeRate = null;
   let lastPtFrame = null;
-  let maxLeverage = null;
-  let ptLimits = null; // papertrade /state/trading limits, refreshed every LIMITS_POLL_MS
-  let limitsTimer = null;
+  let viewCoin = null; // the coin the papertrade page shows
+  const lanes = Object.fromEntries(COINS.map((c) => [c, newLane(c)]));
+  const allLanes = () => COINS.map((c) => lanes[c]);
+  const view = () => lanes[viewCoin ?? COINS[0]];
 
   const state = {
-    settings,
     vault: { unlocked: false, mode: null, remembered: false },
-    pt: { status: "idle", error: null, summary: null },
-    hl: { status: "idle", error: null, account: null, abstraction: null },
+    pt: { status: "idle", error: null },
+    hl: { status: "idle", error: null, abstraction: null },
     winFeeRate: null,
-    auto: false,
     busy: null, // label of the action in flight
     alerts: [], // newest first, { level, text, at }
     lastFill: null,
-    pendingDelta: null, // { delta, since }
-    lastOrderAt: 0,
-    hold: false, // a round is closing papertrade: don't re-hedge into the move
-    safetyNet: { orders: [], error: null, at: null },
   };
 
   const emit = () => publish(snapshot());
@@ -80,118 +98,113 @@ export function createHedgeEngine({ publish, exec }) {
     emit();
   }
 
-  // Tether survives a worker restart: its on/off is saved per coin + hedge wallet, and while it's on a
-  // Hyperliquid price socket stays open, which keeps Chrome from stopping the idle worker.
-  let keepAlive = null;
-  async function setTetherOn(on) {
-    await chrome.storage.local.set({ tether: on ? { coin: settings.coin, hedgeWallet: settings.hedgeWallet } : null });
-    if (on && !keepAlive && hl) keepAlive = await hl.subscribeMid(settings.coin, () => {}).catch(() => null);
-    if (!on) stopKeepAlive();
+  const leverageOf = (coin) => settings.leverage?.[coin] ?? { value: settings.hlLeverage, cross: settings.hlCross };
+  const szDecimals = (coin) => meta[coin].szDecimals;
+  const ptAvailable = () => (lastPtFrame ? Number(BigInt(lastPtFrame.funds.availableBalance)) / 1e18 : 0);
+  const ptBalance = () => (lastPtFrame ? Number(BigInt(lastPtFrame.balance)) / 1e18 : 0);
+
+  // Tether survives a worker restart: which coins it's on is saved per hedge wallet, and while any is
+  // on a Hyperliquid price subscription stays open, which keeps Chrome from stopping the idle worker.
+  async function saveTether() {
+    const coins = Object.fromEntries(allLanes().map((l) => [l.coin, l.auto]));
+    await chrome.storage.local.set({ tether: { hedgeWallet: settings.hedgeWallet, coins } });
   }
-  function stopKeepAlive() {
-    keepAlive?.();
-    keepAlive = null;
+  async function setLaneOn(lane, on) {
+    lane.auto = on;
+    lane.pendingDelta = null;
+    await saveTether();
+    if (on && !lane.keepAlive && hl) lane.keepAlive = await hl.subscribeMid(lane.coin, () => {}).catch(() => null);
+    if (!on) stopKeepAlive(lane);
+  }
+  function stopKeepAlive(lane) {
+    lane.keepAlive?.();
+    lane.keepAlive = null;
   }
 
-  function failAuto(reason) {
-    if (state.auto) {
-      state.auto = false;
-      setTetherOn(false);
-      alert("error", `Tether stopped: ${reason}`);
+  function failAuto(lane, reason) {
+    if (lane.auto) {
+      setLaneOn(lane, false);
+      alert("error", `${lane.coin} Tether stopped: ${reason}`);
     } else {
       alert("error", reason);
     }
   }
 
-  function deltaInfo() {
-    const pt = state.pt.summary;
-    const acct = state.hl.account;
+  function deltaInfo(lane) {
+    const pt = lane.summary;
+    const acct = lane.account;
     if (!pt || !acct) return null;
     const target = -pt.netSize;
     const delta = target - acct.size;
     return { target, delta, deltaUsd: delta * acct.mid, mid: acct.mid };
   }
 
+  const isOpen = (lane) => Math.abs(lane.summary?.netSize ?? 0) > 0 || Math.abs(lane.account?.size ?? 0) > 0;
+
+  // the compact per-coin view for the panel's "other coins" line
+  function brief(lane) {
+    const d = deltaInfo(lane);
+    return { coin: lane.coin, auto: lane.auto, paper: lane.summary?.netSize ?? null, hedge: lane.account?.size ?? null, deltaUsd: d?.deltaUsd ?? null, mid: lane.account?.mid ?? null, open: isOpen(lane) };
+  }
+
   function snapshot() {
-    const d = deltaInfo();
+    const v = view();
+    const d = deltaInfo(v);
+    const lev = leverageOf(v.coin);
     return {
       ...state,
-      settings,
+      // the panel reads these as "the coin I'm showing"
+      settings: { ...settings, coin: v.coin, hlLeverage: lev.value, hlCross: lev.cross },
+      pt: { ...state.pt, summary: v.summary },
+      hl: { ...state.hl, account: v.account },
+      auto: v.auto,
+      pendingDelta: v.pendingDelta,
+      safetyNet: v.net,
       delta: d,
-      ptBustDist: state.pt.summary?.bust && d ? Math.abs(state.pt.summary.bust / d.mid - 1) : null,
-      hlLiqDist: state.hl.account?.liqPx && d ? Math.abs(state.hl.account.liqPx / d.mid - 1) : null,
+      ptBustDist: v.summary?.bust && d ? Math.abs(v.summary.bust / d.mid - 1) : null,
+      hlLiqDist: v.account?.liqPx && d ? Math.abs(v.account.liqPx / d.mid - 1) : null,
       suggestion: rebalanceSuggestion(),
-      maxLeverage,
-      rounds: rounds.snapshot(),
+      maxLeverage: meta?.[v.coin]?.maxLeverage ?? null,
+      lanes: Object.fromEntries(allLanes().map((l) => [l.coin, brief(l)])),
       exits: exits.snapshot(),
       // this coin's papertrade positions, decoded, for the TP/SL editors
-      ptPositions: lastPtFrame && state.hl.account ? safePositions(settings.coin, state.hl.account.mid) : [],
-      pageCoin,
-      managing: rounds.managing() || !!tetheredCoin() || exits.managing(),
-      lockedBy: pageCoin && pageCoin !== settings.coin ? (rounds.lockedCoin() ? "round" : tetheredCoin() ? "tether" : null) : null,
-      capacityInputs: capacityInputs(),
+      ptPositions: lastPtFrame && v.account ? safePositions(v.coin, v.account.mid) : [],
+      pageCoin: viewCoin,
+      managing: allLanes().some((l) => l.auto && isOpen(l)) || exits.managing(),
     };
-  }
-
-  // Everything the max-size calculation needs, from live balances on both venues.
-  // null until both papertrade and Hyperliquid have reported.
-  function capacityInputs() {
-    const acct = state.hl.account;
-    if (!ptLimits || !acct || !lastPtFrame) return null;
-    const { oi, ...limits } = ptLimits;
-    return {
-      ptAvailable: Number(BigInt(lastPtFrame.funds.availableBalance)) / 1e18,
-      ptLimits: { ...limits, roomLongUsd: sideRoomUsd(ptLimits, true, acct.mid), roomShortUsd: sideRoomUsd(ptLimits, false, acct.mid) },
-      hlAvailableToTrade: acct.availableToTrade,
-      hlLeverage: settings.hlLeverage,
-      hlMaxLeverage: maxLeverage,
-      maxOrderUsd: settings.maxOrderUsd,
-      maxPositionUsd: settings.maxPositionUsd,
-      mid: acct.mid,
-    };
-  }
-
-  function capacity(isPaperLong, ptLeverage, hedge) {
-    const inp = capacityInputs();
-    if (!inp) throw new Error("Waiting for papertrade and Hyperliquid balances");
-    return roundCapacity({
-      ...inp,
-      isPaperLong,
-      ptLeverage,
-      hedge,
-      ptLimits: { ...inp.ptLimits, sideRoomUsd: isPaperLong ? inp.ptLimits.roomLongUsd : inp.ptLimits.roomShortUsd },
-    });
   }
 
   async function refreshLimits() {
     try {
-      ptLimits = await withRetry(() => tradingLimits(settings.coin), { label: "papertrade trading state" });
+      const all = await withRetry(() => io.tradingLimitsAll(), { label: "papertrade trading state" });
+      for (const l of allLanes()) l.limits = all[l.coin] ?? null;
     } catch (err) {
       alert("warn", `Couldn't refresh papertrade limits: ${err.message}`);
     }
   }
 
-  // HL needs enough equity that its liquidation sits >= k x papertrade's bust distance away;
-  // papertrade needs one round of margin available. Whatever is left over can move.
+  // HL needs enough equity that every hedge's liquidation sits ≥ k × that coin's papertrade bust
+  // distance away; papertrade needs one trade's margin available. Whatever is left over can move.
   function rebalanceSuggestion() {
-    const pt = state.pt.summary;
-    const acct = state.hl.account;
-    if (!pt || !acct) return null;
-    const bustDist = pt.bust ? Math.abs(pt.bust / acct.mid - 1) : 1 / 200;
-    const hlNotional = Math.max(Math.abs(acct.size), Math.abs(pt.netSize)) * acct.mid;
-    const hlRequired = hlNotional * bustDist * settings.marginK;
-    const hlEquity = acct.equity;
-    const hlExcess = hlEquity - hlRequired;
-    const ptShort = settings.roundMarginUsd - pt.available;
+    const ready = allLanes().filter((l) => l.summary && l.account);
+    if (!ready.length) return null;
+    const hlRequired = ready.reduce((sum, l) => {
+      const bustDist = l.summary.bust ? Math.abs(l.summary.bust / l.account.mid - 1) : 1 / 200;
+      const notional = Math.max(Math.abs(l.account.size), Math.abs(l.summary.netSize)) * l.account.mid;
+      return sum + notional * bustDist * settings.marginK;
+    }, 0);
+    const hlExcess = ready[0].account.equity - hlRequired;
+    const available = ptAvailable();
+    const ptShort = settings.roundMarginUsd - available;
     if (ptShort > 1 && hlExcess > 1) return { direction: "toPapertrade", amount: Math.floor(Math.min(ptShort, hlExcess)), hlRequired, hlExcess };
-    if (hlExcess < -1 && pt.available > 1) return { direction: "toHyperliquid", amount: Math.ceil(Math.min(-hlExcess, pt.available)), hlRequired, hlExcess };
+    if (hlExcess < -1 && available > 1) return { direction: "toHyperliquid", amount: Math.ceil(Math.min(-hlExcess, available)), hlRequired, hlExcess };
     return { direction: null, amount: 0, hlRequired, hlExcess };
   }
 
   // Trading actions (orders, cancels, leverage) use the always-available agent key when one is
   // approved for this wallet/network; otherwise the unlocked main key.
   async function signer() {
-    const agent = await getAgent(settings.hedgeWallet, settings.network);
+    const agent = await io.getAgent(settings.hedgeWallet, settings.network);
     if (agent) {
       const s = localKeySigner(agent.privateKey, agent.address);
       s.user = settings.hedgeWallet.toLowerCase(); // the account the agent trades for
@@ -202,18 +215,18 @@ export function createHedgeEngine({ publish, exec }) {
 
   // Transfers and approvals are user-signed: only the hedge wallet's own key can do them.
   async function mainSigner() {
-    const secret = await getSecret();
+    const secret = await io.getSecret();
     if (!secret) throw new Error("Main key is locked — unlock it (HUD or settings) for transfers and approvals");
     return buildSigner(secret, settings.hedgeWallet);
   }
 
   async function canTrade() {
-    return !!(await getAgent(settings.hedgeWallet, settings.network)) || !!(await getSecret());
+    return !!(await io.getAgent(settings.hedgeWallet, settings.network)) || !!(await io.getSecret());
   }
 
   async function ensureBuilderFeeApproved() {
     if (!settings.builderFee || (await hl.builderFeeApproved(settings.hedgeWallet))) return;
-    if (!(await getSecret())) throw new Error("The builder fee isn't approved yet: reconnect in settings (or turn the fee off there)");
+    if (!(await io.getSecret())) throw new Error("The builder fee isn't approved yet: reconnect in settings (or turn the fee off there)");
     await hl.approveBuilderFee(await mainSigner());
   }
 
@@ -223,16 +236,16 @@ export function createHedgeEngine({ publish, exec }) {
   async function setupAgent(main = null) {
     if (!settings.hedgeWallet) throw new Error("Add your Hyperliquid hedge wallet first");
     // works before papertrade is open too: only Hyperliquid is involved
-    const client = hl ?? createHl();
+    const client = hl ?? io.createHl();
     return run("Setting up trading key", async () => {
       main ??= await mainSigner();
       const privateKey = generatePrivateKey();
       const { address } = privateKeyToAccount(privateKey);
       const validUntil = Date.now() + AGENT_VALID_DAYS * 86400_000;
       await client.approveAgent(main, { agentAddress: address, name: AGENT_NAME, validUntil });
-      await storeAgent({ privateKey, address, hedgeWallet: settings.hedgeWallet, network: settings.network, validUntil });
+      await io.storeAgent({ privateKey, address, hedgeWallet: settings.hedgeWallet, network: settings.network, validUntil });
       if (settings.builderFee && !(await client.builderFeeApproved(settings.hedgeWallet))) await client.approveBuilderFee(main);
-      state.vault = await vaultStatus();
+      state.vault = await io.vaultStatus();
       alert("ok", `Trading key ${address.slice(0, 8)}… approved until ${new Date(validUntil).toLocaleDateString()}`);
       return { address, validUntil };
     });
@@ -249,219 +262,219 @@ export function createHedgeEngine({ publish, exec }) {
     return { ...acct, equity, outable: Math.max(0, equity - acct.marginUsed) };
   }
 
+  // one read for every lane; `fresh`: coins about to trade (re-read their leverage / margin)
+  async function readHl(fresh = []) {
+    const { shared, byCoin } = await hl.accounts(settings.hedgeWallet, COINS, { fresh });
+    for (const l of allLanes()) l.account = withTotals({ ...shared, ...byCoin[l.coin] });
+    state.hl.status = "live";
+    state.hl.error = null;
+    if (lastPtFrame) for (const l of allLanes()) remarkPt(l);
+  }
+
   async function refreshHl() {
     if (!hl || !settings.hedgeWallet) return;
     try {
-      state.hl.account = withTotals(await hl.account(settings.hedgeWallet, settings.coin));
-      state.hl.status = "live";
-      state.hl.error = null;
-      tryResumeAuto();
+      await readHl();
+      for (const l of allLanes()) tryResume(l);
     } catch (err) {
+      // every lane pauses (maybeAutoHedge needs both feeds live) and resumes on the next good read
       state.hl.status = "down";
       state.hl.error = String(err.message || err);
-      // Tether pauses (maybeAutoHedge needs both feeds live) and resumes on the next good read
     }
-    // re-mark papertrade P&L at the latest mid between stream frames
-    if (lastPtFrame && state.hl.account) remarkPt();
-    maybeAutoHedge();
+    for (const l of allLanes()) maybeAutoHedge(l);
     emit();
-    followPageCoin();
-    syncSafetyNet();
+    for (const l of allLanes()) syncSafetyNet(l);
   }
 
-  // ---------- native safety net (src/safetynet.js) ----------
-  let netBusy = false;
-  let netAt = 0;
-  let netKey = "";
-
-  async function syncSafetyNet() {
-    if (netBusy || !hl || !lastPtFrame || !state.hl.account) return;
-    const acct = state.hl.account;
-    const positions = positionsOf(lastPtFrame, settings.coin, acct.mid);
+  // ---------- native safety net (src/safetynet.js), per lane ----------
+  async function syncSafetyNet(lane) {
+    if (lane.netBusy || !hl || !lastPtFrame || !lane.account) return;
+    const acct = lane.account;
+    const positions = safePositions(lane.coin, acct.mid);
     const key = JSON.stringify([settings.safetyNet, acct.size, positions.map((p) => [p.id, p.bust, p.size])]);
-    const since = Date.now() - netAt;
-    if (since < NET_RETRY_MS || (key === netKey && since < NET_REFRESH_MS)) return;
+    const since = Date.now() - lane.netAt;
+    if (since < NET_RETRY_MS || (key === lane.netKey && since < NET_REFRESH_MS)) return;
     if (!(await canTrade())) {
-      state.safetyNet = { orders: [], error: positions.length && acct.size ? "needs the trading key (or an unlocked main key)" : null, at: null };
+      lane.net = { orders: [], error: positions.length && acct.size ? "needs the trading key (or an unlocked main key)" : null, at: null };
       return;
     }
-    netBusy = true;
-    netAt = Date.now();
-    const storeKey = `${settings.hedgeWallet.toLowerCase()}:${settings.network}:${settings.coin}`;
+    lane.netBusy = true;
+    lane.netAt = Date.now();
+    const storeKey = `${settings.hedgeWallet.toLowerCase()}:${settings.network}:${lane.coin}`;
     try {
       const { safetyNetOids = {} } = await chrome.storage.local.get("safetyNetOids");
       const mine = new Set(safetyNetOids[storeKey] ?? []);
-      const open = await hl.openOrders(settings.hedgeWallet, settings.coin);
+      const open = await hl.openOrders(settings.hedgeWallet, lane.coin);
       const ours = open
         .filter((o) => mine.has(o.oid))
         .map((o) => ({ oid: o.oid, triggerPx: Number(o.triggerPx), sz: Number(o.sz), closeIsBuy: o.side === "B" }));
+      const dec = szDecimals(lane.coin);
       const plan = settings.safetyNet
-        ? planSafetyNet({ positions, hlSize: acct.size, ours, roundSz: (v) => roundSize(v, szDecimals), roundPx: (v) => roundPrice(v, szDecimals) })
+        ? planSafetyNet({ positions, hlSize: acct.size, ours, roundSz: (v) => roundSize(v, dec), roundPx: (v) => roundPrice(v, dec) })
         : { keep: [], place: [], cancel: ours.map((o) => o.oid) };
       const s = await signer();
-      if (plan.cancel.length) await hl.cancel(s, settings.coin, plan.cancel);
+      if (plan.cancel.length) await hl.cancel(s, lane.coin, plan.cancel);
       const active = [...plan.keep];
-      const remember = () => chrome.storage.local.set({ safetyNetOids: { ...safetyNetOids, [storeKey]: active.map((o) => o.oid) } });
+      const remember = async () => {
+        const { safetyNetOids: latest = {} } = await chrome.storage.local.get("safetyNetOids");
+        await chrome.storage.local.set({ safetyNetOids: { ...latest, [storeKey]: active.map((o) => o.oid) } });
+      };
       await remember();
       for (const d of plan.place) {
-        active.push({ ...d, oid: await hl.placeTrigger(s, { coin: settings.coin, closeIsBuy: d.closeIsBuy, size: d.sz, triggerPx: d.triggerPx, tpsl: "tp" }) });
+        active.push({ ...d, oid: await hl.placeTrigger(s, { coin: lane.coin, closeIsBuy: d.closeIsBuy, size: d.sz, triggerPx: d.triggerPx, tpsl: "tp" }) });
         await remember(); // one at a time, so a failure part-way never loses track of a resting order
       }
-      state.safetyNet = { orders: active.map(({ triggerPx, sz }) => ({ triggerPx, sz })), error: null, at: Date.now() };
-      netKey = key;
+      lane.net = { orders: active.map(({ triggerPx, sz }) => ({ triggerPx, sz })), error: null, at: Date.now() };
+      lane.netKey = key;
     } catch (err) {
-      state.safetyNet = { ...state.safetyNet, error: String(err.message || err) };
-      netKey = "";
+      lane.net = { ...lane.net, error: String(err.message || err) };
+      lane.netKey = "";
     } finally {
-      netBusy = false;
+      lane.netBusy = false;
       emit();
     }
   }
 
-  function remarkPt() {
+  function remarkPt(lane) {
     try {
-      state.pt.summary = summarize(lastPtFrame, settings.coin, state.hl.account.mid, state.winFeeRate ?? 0);
+      lane.summary = io.summarize(lastPtFrame, lane.coin, lane.account.mid, state.winFeeRate ?? 0);
     } catch {
-      state.pt.summary = null; // a price that can't be read against this mid yet: wait for the next one
+      lane.summary = null; // a price that can't be read against this mid yet: wait for the next one
     }
   }
 
   function onPtFrame(frame) {
     lastPtFrame = frame;
-    if (!state.hl.account) {
-      emit();
-      return;
+    for (const l of allLanes()) {
+      if (!l.account) continue;
+      remarkPt(l);
+      maybeAutoHedge(l);
     }
-    remarkPt();
-    maybeAutoHedge();
     emit();
   }
 
   function onPtStatus(status, error = null) {
     state.pt.status = status;
     state.pt.error = error;
-    if (status === "live") tryResumeAuto();
     // a dropped stream reconnects by itself (subscribeAccount); Tether pauses meanwhile and resumes on
     // the next frame, re-hedging whatever filled in between
+    if (status === "live") for (const l of allLanes()) tryResume(l);
     emit();
   }
 
-  function maybeAutoHedge() {
-    if (!state.auto || state.hold || state.busy || state.pt.status !== "live" || state.hl.status !== "live") return;
-    const d = deltaInfo();
+  const live = () => state.pt.status === "live" && state.hl.status === "live";
+
+  function maybeAutoHedge(lane) {
+    if (!lane.auto || state.busy || !live()) return;
+    const d = deltaInfo(lane);
     if (!d || Math.abs(d.deltaUsd) <= settings.bandUsd) {
-      state.pendingDelta = null;
+      lane.pendingDelta = null;
       return;
     }
     const now = Date.now();
-    const step = 10 ** -szDecimals;
-    if (!state.pendingDelta || Math.abs(state.pendingDelta.delta - d.delta) > step) {
-      state.pendingDelta = { delta: d.delta, since: now };
-      setTimeout(maybeAutoHedge, AUTO_STABLE_MS + 10);
+    const step = 10 ** -szDecimals(lane.coin);
+    if (!lane.pendingDelta || Math.abs(lane.pendingDelta.delta - d.delta) > step) {
+      lane.pendingDelta = { delta: d.delta, since: now };
+      setTimeout(() => maybeAutoHedge(lane), AUTO_STABLE_MS + 10);
       return;
     }
-    if (now - state.pendingDelta.since < AUTO_STABLE_MS) return;
-    if (now - state.lastOrderAt < AUTO_MIN_GAP_MS) {
-      setTimeout(maybeAutoHedge, AUTO_MIN_GAP_MS - (now - state.lastOrderAt) + 10);
+    if (now - lane.pendingDelta.since < AUTO_STABLE_MS) return;
+    if (now - lane.lastOrderAt < AUTO_MIN_GAP_MS) {
+      setTimeout(() => maybeAutoHedge(lane), AUTO_MIN_GAP_MS - (now - lane.lastOrderAt) + 10);
       return;
     }
-    hedgeNow("auto").catch((err) => {
+    hedgeLane(lane, "auto").catch((err) => {
       const msg = String(err.message || err);
       // network trouble: stay on and try again (orders carry a cloid, so a retry can't double up)
       if (TRANSIENT.test(msg)) {
-        alert("warn", `Hedge order didn't go through (${msg}); retrying`);
-        state.lastOrderAt = Date.now();
-        setTimeout(maybeAutoHedge, AUTO_MIN_GAP_MS + 10);
+        alert("warn", `${lane.coin} hedge order didn't go through (${msg}); retrying`);
+        lane.lastOrderAt = Date.now();
+        setTimeout(() => maybeAutoHedge(lane), AUTO_MIN_GAP_MS + 10);
         return;
       }
-      failAuto(msg);
+      failAuto(lane, msg);
     });
   }
 
-  async function run(label, fn) {
-    if (state.busy) throw new Error(`Busy: ${state.busy}`);
-    state.busy = label;
-    emit();
-    try {
-      return await fn();
-    } finally {
-      state.busy = null;
+  // One Hyperliquid action at a time, across all lanes: queued, not refused, so BTC and ETH hedges
+  // that come due together both go out, one after the other.
+  let queue = Promise.resolve();
+  function run(label, fn) {
+    const job = queue.then(async () => {
+      state.busy = label;
       emit();
-    }
+      try {
+        return await fn();
+      } finally {
+        state.busy = null;
+        emit();
+      }
+    });
+    queue = job.catch(() => {});
+    return job;
   }
 
-  async function hedgeNow(source = "manual") {
-    return run(source === "auto" ? "Auto-hedging" : "Hedging", async () => {
-      await refreshHlQuiet();
-      const d = deltaInfo();
-      if (!d) throw new Error("Need both papertrade and Hyperliquid state to hedge");
-      const size = roundSize(Math.abs(d.delta), szDecimals);
+  async function hedgeLane(lane, source = "manual") {
+    return run(source === "auto" ? `Hedging ${lane.coin}` : `Hedging ${lane.coin}`, async () => {
+      await readHl([lane.coin]);
+      const d = deltaInfo(lane);
+      if (!d) throw new Error(`Need both papertrade and Hyperliquid state to hedge ${lane.coin}`);
+      const size = roundSize(Math.abs(d.delta), szDecimals(lane.coin));
       if (size === 0) return null;
       const orderUsd = size * d.mid;
       if (orderUsd > settings.maxOrderUsd) throw new Error(`Hedge order $${orderUsd.toFixed(0)} exceeds max order $${settings.maxOrderUsd}`);
       if (Math.abs(d.target) * d.mid > settings.maxPositionUsd) throw new Error(`Target hedge $${(Math.abs(d.target) * d.mid).toFixed(0)} exceeds max position $${settings.maxPositionUsd}`);
-      const current = state.hl.account.size;
+      const current = lane.account.size;
       const isBuy = d.delta > 0;
       // reduce-only when the order only shrinks the existing HL position (no flip)
       const reduceOnly = current !== 0 && Math.sign(d.delta) !== Math.sign(current) && Math.abs(d.delta) <= Math.abs(current) + 1e-12;
-      state.lastOrderAt = Date.now();
+      lane.lastOrderAt = Date.now();
       const s = await signer();
-      await ensureLeverage(s);
+      await ensureLeverage(lane, s);
       await ensureBuilderFeeApproved();
+      const lev = leverageOf(lane.coin);
       if (!reduceOnly) {
         // only the part that adds exposure needs margin; HL's availableToTrade is per side
-        await refreshHlQuiet();
+        await readHl([lane.coin]);
         const flipping = current !== 0 && Math.sign(d.delta) !== Math.sign(current);
         const addingUsd = (flipping ? size - Math.abs(current) : size) * d.mid;
-        const free = state.hl.account.availableToTrade[isBuy ? 0 : 1];
-        const maxUsd = free / (1 / settings.hlLeverage + HL_COST_FRACTION);
+        const free = lane.account.availableToTrade[isBuy ? 0 : 1];
+        const maxUsd = free / (1 / lev.value + HL_COST_FRACTION);
         if (addingUsd > maxUsd + 1) {
-          throw new Error(`Hyperliquid can only carry $${Math.floor(maxUsd).toLocaleString()} more ${isBuy ? "long" : "short"} at ${settings.hlLeverage}x ($${free.toFixed(2)} free); this hedge needs $${Math.ceil(addingUsd).toLocaleString()}`);
+          throw new Error(`Hyperliquid can only carry $${Math.floor(maxUsd).toLocaleString()} more ${lane.coin} ${isBuy ? "long" : "short"} at ${lev.value}x ($${free.toFixed(2)} free); this hedge needs $${Math.ceil(addingUsd).toLocaleString()}`);
         }
       }
-      const fill = await hl.marketOrder(s, {
-        coin: settings.coin,
-        isBuy,
-        size,
-        reduceOnly,
-        slippageBps: settings.slippageBps,
-        builderFee: settings.builderFee,
-      });
-      state.lastFill = { ...fill, at: Date.now(), source };
-      state.pendingDelta = null;
-      await refreshHlQuiet();
+      const fill = await hl.marketOrder(s, { coin: lane.coin, isBuy, size, reduceOnly, slippageBps: settings.slippageBps, builderFee: settings.builderFee });
+      state.lastFill = { ...fill, coin: lane.coin, at: Date.now(), source };
+      lane.pendingDelta = null;
+      await readHl([lane.coin]);
       return fill;
     });
   }
 
-  async function ensureLeverage(s) {
-    const lev = state.hl.account.leverage;
-    if (lev.value === settings.hlLeverage && lev.isCross === settings.hlCross) return;
-    await hl.setLeverage(s, settings.coin, settings.hlLeverage, settings.hlCross);
+  async function ensureLeverage(lane, s) {
+    const want = leverageOf(lane.coin);
+    const lev = lane.account.leverage;
+    if (lev.value === want.value && lev.isCross === want.cross) return;
+    await hl.setLeverage(s, lane.coin, want.value, want.cross);
   }
 
-  // picking leverage in the HUD saves it and applies it right away
-  async function setLeverage({ leverage, cross }) {
-    return run("Setting leverage", async () => {
-      const next = { ...settings, hlLeverage: leverage, hlCross: cross };
-      // before setup (no wallet or locked key) just save it; ensureLeverage applies it on HL
-      // ahead of the first hedge order
+  // picking leverage in the HUD saves it for that coin and applies it right away
+  async function setLeverage({ leverage, cross, coin = view().coin }) {
+    return run(`Setting ${coin} leverage`, async () => {
+      const next = { ...settings, leverage: { ...settings.leverage, [coin]: { value: leverage, cross } } };
+      // before setup (no wallet or locked key) just save it; ensureLeverage applies it ahead of the
+      // first hedge order on that coin
       const canApply = hl && settings.hedgeWallet && (await canTrade());
       if (canApply) {
-        if (maxLeverage && leverage > maxLeverage) throw new Error(`${settings.coin} max leverage on Hyperliquid is ${maxLeverage}x`);
-        await refreshHlQuiet();
-        await hl.setLeverage(await signer(), settings.coin, leverage, cross);
+        const max = meta?.[coin]?.maxLeverage;
+        if (max && leverage > max) throw new Error(`${coin} max leverage on Hyperliquid is ${max}x`);
+        await hl.setLeverage(await signer(), coin, leverage, cross);
       }
       settings = next;
       await chrome.storage.local.set({ hedgeSettings: next, hedgeSettingsQuiet: Date.now() });
-      if (canApply) await refreshHlQuiet();
+      if (canApply) await readHl([coin]);
     });
-  }
-
-  // before and after orders: everything fresh, including leverage and available-to-trade
-  async function refreshHlQuiet() {
-    state.hl.account = withTotals(await hl.account(settings.hedgeWallet, settings.coin, { fresh: true }));
-    state.hl.status = "live";
   }
 
   // `secret` ({mode, secret}): a key pasted for this one transfer, used and dropped
@@ -470,8 +483,8 @@ export function createHedgeEngine({ publish, exec }) {
       if (!(amount > 0)) throw new Error("Amount must be positive");
       // transfers are user-signed; the trading key can't move funds
       const s = secret ? buildSigner(secret, settings.hedgeWallet) : await mainSigner();
-      await refreshHlQuiet();
-      const acct = state.hl.account;
+      await readHl([view().coin]);
+      const acct = view().account;
       // unified/portfolio accounts spend spot USDC as collateral; default accounts keep perp
       // margin separate, so move what's missing from perp to spot first
       if (state.hl.abstraction === "default" && acct.spotUsdc < amount) {
@@ -479,11 +492,11 @@ export function createHedgeEngine({ publish, exec }) {
         if (need > acct.withdrawable) throw new Error(`Only $${acct.withdrawable.toFixed(2)} withdrawable from HL perps`);
         await hl.perpToSpot(s, need);
       }
-      const before = state.pt.summary?.balance ?? 0;
-      const proxy = await depositProxy(settings.ptWallet);
+      const before = ptBalance();
+      const proxy = await io.depositProxy(settings.ptWallet);
       await hl.sendUsdc(s, proxy, amount);
-      await depositProxy(settings.ptWallet); // nudges papertrade to index the deposit
-      const credited = await waitFor(() => (state.pt.summary?.balance ?? 0) >= before + amount * 0.99, DEPOSIT_CONFIRM_TIMEOUT_MS);
+      await io.depositProxy(settings.ptWallet); // nudges papertrade to index the deposit
+      const credited = await waitFor(() => ptBalance() >= before + amount * 0.99, DEPOSIT_CONFIRM_TIMEOUT_MS);
       if (!credited) {
         alert("warn", `Sent $${amount} to papertrade's deposit proxy ${proxy.slice(0, 8)}… but it isn't credited yet — check papertrade before sending more`);
         return { credited: false, proxy };
@@ -505,8 +518,8 @@ export function createHedgeEngine({ publish, exec }) {
     });
   }
 
-  // The papertrade wallet defaults to the account signed in on papertrade itself (reported by the
-  // HUD from the page's wallet session); a wallet saved in settings overrides it.
+  // The papertrade account is the one signed in on papertrade itself (reported by the HUD from the
+  // page's wallet session).
   let lastNext = {};
   let sessionWallet = null;
   const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -519,137 +532,119 @@ export function createHedgeEngine({ publish, exec }) {
     await configure(lastNext); // signed in as a different papertrade account: follow it
   }
 
-  // The coin follows the papertrade page (/trade/btc, /trade/eth), but a round that's still
-  // running keeps the engine on its own coin until it's done.
-  let pageCoin = null;
-  let switching = false;
-
+  // the papertrade page only changes which lane the panel shows; every lane keeps running
   async function setPageCoin({ coin }) {
     const c = String(coin ?? "").toUpperCase();
-    if (!(c in INSTRUMENT_IDS) || c === pageCoin) return;
-    pageCoin = c;
+    if (!(c in INSTRUMENT_IDS) || c === viewCoin) return;
+    viewCoin = c;
     await chrome.storage.local.set({ ptPageCoin: c });
-    await followPageCoin();
     emit();
   }
 
-  // while auto-hedge is tethering an open position, the engine stays on that coin
-  function tetheredCoin() {
-    if (!state.auto) return null;
-    const open = Math.abs(state.pt.summary?.netSize ?? 0) > 0 || Math.abs(state.hl.account?.size ?? 0) > 0;
-    return open ? settings.coin : null;
-  }
-
-  async function followPageCoin() {
-    if (switching || !pageCoin || pageCoin === settings.coin) return;
-    await (roundsReady ??= rounds.init());
-    if (rounds.lockedCoin() || tetheredCoin()) return;
-    switching = true;
-    const keepAuto = state.auto;
-    try {
-      await configure(lastNext);
-      resumeAuto = keepAuto;
-      tryResumeAuto();
-    } finally {
-      switching = false;
-    }
-  }
-
-  let resumeAuto = false;
-  function tryResumeAuto() {
-    if (!resumeAuto || state.pt.status !== "live" || state.hl.status !== "live") return;
-    resumeAuto = false;
-    setAuto(true).then(
-      () => alert("ok", `Tether resumed on ${settings.coin}`),
+  function tryResume(lane) {
+    if (!lane.resume || !live() || !lane.account) return;
+    lane.resume = false;
+    setAuto({ on: true, coin: lane.coin }).then(
+      () => alert("ok", `Tether resumed on ${lane.coin}`),
       (err) => {
-        setTetherOn(false);
-        alert("warn", `Tether not resumed on ${settings.coin}: ${err.message}`);
+        setLaneOn(lane, false);
+        alert("warn", `Tether not resumed on ${lane.coin}: ${err.message}`);
       },
     );
+  }
+
+  // which coins Tether was on, per hedge wallet (older versions saved one coin)
+  async function savedTether() {
+    const { tether } = await chrome.storage.local.get("tether");
+    if (!tether || tether.hedgeWallet !== settings.hedgeWallet) return {};
+    if (tether.coins) return tether.coins;
+    return tether.coin ? { [tether.coin]: true } : {};
   }
 
   async function configure(next) {
     lastNext = next ?? {};
     if (sessionWallet === null) sessionWallet = (await chrome.storage.local.get("ptSessionWallet")).ptSessionWallet ?? null;
-    if (pageCoin === null) pageCoin = (await chrome.storage.local.get("ptPageCoin")).ptPageCoin ?? null;
-    await (roundsReady ??= rounds.init());
+    if (viewCoin === null) viewCoin = (await chrome.storage.local.get("ptPageCoin")).ptPageCoin ?? null;
     settings = { ...HEDGE_DEFAULTS, ...next, network: "mainnet" }; // papertrade runs on mainnet prices only
-    settings.coin = rounds.lockedCoin() ?? pageCoin ?? settings.coin;
     // always the account signed in on papertrade (an override saved by an older version is ignored)
     settings.ptWallet = sessionWallet ?? "";
     settings.ptWalletFromSession = true;
-    state.auto = false;
-    stopKeepAlive();
-    const { tether } = await chrome.storage.local.get("tether");
-    resumeAuto = !!tether && tether.coin === settings.coin && tether.hedgeWallet === settings.hedgeWallet;
+    for (const l of allLanes()) {
+      stopKeepAlive(l);
+      Object.assign(l, newLane(l.coin));
+    }
+    const on = await savedTether();
+    for (const l of allLanes()) l.resume = !!on[l.coin];
     stopPt?.();
     clearInterval(pollTimer);
     clearInterval(limitsTimer);
-    ptLimits = null;
-    state.pt = { status: "idle", error: null, summary: null };
+    state.pt = { status: "idle", error: null };
     lastPtFrame = null;
-    state.hl = { status: "idle", error: null, account: null, abstraction: null };
-    state.vault = await vaultStatus();
+    state.hl = { status: "idle", error: null, abstraction: null };
+    state.vault = await io.vaultStatus();
     emit();
     hl = null;
     if (!settings.ptWallet) return;
-    stopPt = subscribeAccount(settings.ptWallet, { onFrame: onPtFrame, onStatus: onPtStatus });
+    stopPt = io.subscribeAccount(settings.ptWallet, { onFrame: onPtFrame, onStatus: onPtStatus });
     await refreshLimits();
     limitsTimer = setInterval(refreshLimits, LIMITS_POLL_MS);
     if (!settings.hedgeWallet) return;
-    hl = createHl();
-    const meta = await hl.loadMeta();
-    szDecimals = meta[settings.coin].szDecimals;
-    maxLeverage = meta[settings.coin].maxLeverage;
-    state.winFeeRate = feeRate ??= await winFeeRate();
+    hl = io.createHl();
+    meta = await hl.loadMeta();
+    state.winFeeRate = feeRate ??= await io.winFeeRate();
     // papertrade's own mapping: anything that isn't unified/portfolio margin behaves as "default"
     const mode = await hl.abstraction(settings.hedgeWallet);
     state.hl.abstraction = mode === "unifiedAccount" || mode === "portfolioMargin" ? mode : "default";
     pollTimer = setInterval(refreshHl, HL_POLL_MS);
     await refreshHl();
-    await wakeRounds(); // resume any round persisted before a worker restart
   }
 
-  async function setAuto(on) {
+  async function setAuto({ on, coin = view().coin }) {
+    const lane = lanes[coin];
+    if (!lane) throw new Error(`Unknown coin ${coin}`);
     if (on) {
-      if (!(await canTrade())) throw new Error("Set up the trading key (or unlock the main key) before turning on Tether");
-      if (state.pt.status !== "live" || state.hl.status !== "live") throw new Error("Both papertrade and Hyperliquid must be live");
+      if (!(await canTrade())) throw new Error("Connect your Hyperliquid wallet before turning on Tether");
+      if (!live()) throw new Error("Both papertrade and Hyperliquid must be live");
     }
-    state.auto = on;
-    state.pendingDelta = null;
-    await setTetherOn(on);
+    await setLaneOn(lane, on);
     emit();
-    if (on) maybeAutoHedge();
+    if (on) maybeAutoHedge(lane);
+  }
+
+  async function hedgeNow({ coin = view().coin } = {}) {
+    return hedgeLane(lanes[coin], "manual");
   }
 
   async function refreshVault() {
-    state.vault = await vaultStatus();
-    if (state.auto && !(await canTrade())) failAuto("no trading key and the main key is locked");
+    state.vault = await io.vaultStatus();
+    if (!(await canTrade())) for (const l of allLanes()) if (l.auto) failAuto(l, "no trading key and the main key is locked");
     emit();
   }
 
   function safePositions(coin, mid) {
     try {
-      return positionsOf(lastPtFrame, coin, mid);
+      return io.positionsOf(lastPtFrame, coin, mid);
     } catch {
       return []; // a price we can't decode against this mid (mid not loaded yet)
     }
   }
 
+  const laneMids = (mids) => ({ ...mids, ...Object.fromEntries(allLanes().filter((l) => l.account).map((l) => [l.coin, l.account.mid])) });
   const exits = createExits({
     positions: (mids) => {
       if (!lastPtFrame) return [];
-      const known = { ...mids, ...(state.hl.account ? { [settings.coin]: state.hl.account.mid } : {}) };
-      return Object.keys(INSTRUMENT_IDS).flatMap((coin) => (known[coin] ? safePositions(coin, known[coin]) : []));
+      const known = laneMids(mids);
+      return COINS.flatMap((coin) => (known[coin] ? safePositions(coin, known[coin]) : []));
     },
     readableCoins: (mids) => {
       if (!lastPtFrame) return [];
-      const known = { ...mids, ...(state.hl.account ? { [settings.coin]: state.hl.account.mid } : {}) };
-      return Object.keys(INSTRUMENT_IDS).filter((coin) => known[coin]);
+      const known = laneMids(mids);
+      return COINS.filter((coin) => known[coin]);
     },
     closeQueued: (id) => (lastPtFrame?.operations ?? []).some((op) => op[1] === "closePositions" && (op[9] ?? []).map(String).includes(id)),
     ptLive: () => state.pt.status === "live" && !!lastPtFrame,
-    subscribeMid: (coin, fn) => (hl ?? createHl()).subscribeMid(coin, fn),
+    subscribeMid: (coin, fn) => (hl ?? io.createHl()).subscribeMid(coin, fn),
+    mid: (coin) => (hl ?? io.createHl()).mid(coin),
     exec,
     alert: (level, text) => alert(level, text),
     emit: () => emit(),
@@ -663,70 +658,8 @@ export function createHedgeEngine({ publish, exec }) {
 
   async function armExit(args) {
     await exitsReady;
-    return exits.arm({ coin: settings.coin, ...args });
+    return exits.arm({ coin: view().coin, ...args });
   }
 
-  let roundsReady = null;
-  const rounds = createRounds({
-    hl: () => {
-      if (!hl) throw new Error("Hedge isn't configured");
-      return hl;
-    },
-    signer,
-    coin: () => settings.coin,
-    instrumentId: () => INSTRUMENT_IDS[settings.coin],
-    hedgeWallet: () => settings.hedgeWallet,
-    bandUsd: () => settings.bandUsd,
-    ptFrame: () => lastPtFrame,
-    ptLive: () => state.pt.status === "live" && !!lastPtFrame,
-    hlAccount: () => state.hl.account,
-    delta: () => deltaInfo(),
-    decodePrice: (raw) => decodePrice(raw, state.hl.account.mid),
-    refreshHl: async () => {
-      await refreshHlQuiet();
-      if (lastPtFrame) remarkPt();
-      return state.hl.account;
-    },
-    hedgeNow: (source) => hedgeNow(source),
-    setHold: (on) => {
-      state.hold = on;
-    },
-    capacity: (isPaperLong, ptLeverage, hedge) => capacity(isPaperLong, ptLeverage, hedge),
-    exec,
-    alert,
-    emit,
-  });
-  
-  async function scheduleRound(spec) {
-    await (roundsReady ??= rounds.init());
-    if (!hl) throw new Error("Set the papertrade and hedge wallets first");
-    if (spec.hedge && !(await canTrade())) throw new Error("Set up the trading key (or unlock the main key) to open a hedged trade");
-    if (spec.side !== "long" && spec.side !== "short") throw new Error("Pick long or short");
-    if (pageCoin && pageCoin !== settings.coin) throw new Error(`A ${settings.coin} hedged trade is running — finish it before trading ${pageCoin}`);
-    // must fit both venues now
-    const c = capacity(spec.side === "long", spec.ptLeverage, spec.hedge);
-    if (!c.ok) throw new Error(c.problems[0]);
-    if (spec.marginUsd > c.maxMargin) throw new Error(`Max margin is $${c.maxMargin} — limited by ${c.binding}`);
-    if (spec.marginUsd < c.minMargin) throw new Error(`Min margin is $${c.minMargin} at ${spec.ptLeverage}x (papertrade's $${ptLimits.minNotionalUsd.toLocaleString()} minimum notional)`);
-    return rounds.schedule({ ...spec, coin: settings.coin });
-  }
-
-  async function cancelRound(id) {
-    await (roundsReady ??= rounds.init());
-    return rounds.cancel(id);
-  }
-
-  async function wakeRounds() {
-    await (roundsReady ??= rounds.init());
-    rounds.wake();
-  }
-
-  async function exitRound() {
-    await (roundsReady ??= rounds.init());
-    const r = rounds.activeRound();
-    if (!r) throw new Error("No open trade");
-    return rounds.cancel(r.id);
-  }
-
-  return { setExit, armExit, configure, hedgeNow, setAuto, setLeverage, sendToPapertrade, refreshVault, snapshot, emit, scheduleRound, cancelRound, wakeRounds, setupAgent, exitRound, setSessionWallet, setPageCoin, coin: () => settings.coin };
+  return { setExit, armExit, configure, hedgeNow, setAuto, setLeverage, sendToPapertrade, refreshVault, snapshot, emit, setupAgent, setSessionWallet, setPageCoin, coin: () => view().coin, coins: () => COINS };
 }
