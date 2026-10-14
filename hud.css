@@ -439,3 +439,29 @@ button[data-tip], label[data-tip], input[data-tip] { cursor: pointer; }
 .accts.collapsed > :not(.sec-h) { display: none !important; }
 .foot a { color: var(--muted); text-decoration: none; transition: color 150ms ease-out; }
 .foot a:hover { color: var(--fg); }
+
+/* ---------- TP/SL editor (opens from a position's TP/SL chip) ---------- */
+.pe { position: fixed; z-index: 2147483646; width: 320px; display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 19.6px; background: var(--panel); color: var(--fg); font: 400 13px/1.4 var(--font); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.5), 0 24px 48px -16px rgba(0, 0, 0, 0.75); }
+.pe-h { display: flex; justify-content: space-between; align-items: center; }
+.pe-h b { font: 600 14px/20px var(--font-heading); color: var(--fg); }
+.pe-x { width: 28px; height: 28px; border: 0; border-radius: 10.5px; background: none; color: var(--muted); font-size: 18px; cursor: pointer; line-height: 1; transition: background-color 150ms ease-out, color 150ms ease-out; }
+.pe-x:hover { background: var(--surface-2); color: var(--fg); }
+.pe-sub, .pe-note { margin: 0; font-size: 12px; color: var(--muted); }
+.pe-side { display: flex; flex-direction: column; gap: 6px; }
+.pe-side-h { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.pe-est.up { color: var(--up); } .pe-est.dn { color: var(--down); }
+.pe-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pe-fields input { width: 100%; box-sizing: border-box; height: 36px; padding: 0 12px; border: 0; border-radius: 14px; outline: none; background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--fg); font: 14px var(--font); }
+.pe-fields input:focus { box-shadow: inset 0 0 0 2px var(--ring); }
+.pe-amt { position: relative; }
+.pe-amt input { padding-right: 36px; }
+.pe-amt button { position: absolute; right: 5px; top: 5px; height: 26px; min-width: 26px; padding: 0 6px; border: 0; border-radius: 10.5px; background: var(--surface-3); color: var(--fg); font: 600 12px var(--font); cursor: pointer; }
+.pe-picks { display: flex; gap: 2px; padding: 2px; border-radius: 10.5px; background: var(--surface-1); }
+.pe-picks button { flex: 1; height: 28px; border: 0; border-radius: 7.7px; background: transparent; color: var(--muted); font: 500 12px var(--font); cursor: pointer; transition: background-color 150ms ease-out, color 150ms ease-out; }
+.pe-picks button:hover { color: var(--fg); }
+.pe-picks button.on { background: var(--surface-3); color: var(--fg); }
+.pe-warn, .pe-err { font-size: 12px; color: var(--down); }
+.pe-warn:empty, .pe-err:empty { display: none; }
+.pe-actions { display: flex; gap: 6px; }
+.pe-actions .pbtn { flex: 1; height: 36px; }
+.pe-note b { color: var(--fg); font-weight: 600; }

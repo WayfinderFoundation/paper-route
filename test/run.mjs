@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 let failed = 0;
-for (const t of ["flowindex", "parity", "safetynet", "capacity", "pt-patch", "hl-idempotent", "rounds"]) {
+for (const t of ["flowindex", "parity", "safetynet", "exits", "capacity", "pt-patch", "hl-idempotent", "rounds"]) {
   console.log(`\n=== ${t} ===`);
   try {
     execFileSync(process.execPath, [join(here, `${t}.mjs`)], { stdio: "inherit" });

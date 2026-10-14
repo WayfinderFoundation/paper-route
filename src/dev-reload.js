@@ -1,6 +1,6 @@
 // Dev only (unpacked install has no update_url): reload the extension when any of its files
 // change, so edits on disk never run as a half-updated mix of old script + new CSS.
-const DEV_WATCH = ["manifest.json", "dist/background.js", "content.js", "hedge-ui.js", "chart-bridge.js", "hud.css", "options.html", "options.js"];
+const DEV_WATCH = ["manifest.json", "dist/background.js", "content.js", "hedge-ui.js", "tpsl-ui.js", "chart-bridge.js", "hud.css", "options.html", "options.js"];
 
 // __DEV__ is an esbuild define: true for `npm run build`, false in the release bundle
 if (__DEV__ && !("update_url" in chrome.runtime.getManifest())) {

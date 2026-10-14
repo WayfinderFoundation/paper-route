@@ -53,7 +53,7 @@ export function positionsOf(frame, coin, mid) {
     .map((p) => {
       const scale = priceScale(p.entryRaw, mid);
       const entry = Number(p.entryRaw) / scale;
-      return { id: p.id, isLong: p.isLong, size: (p.margin * p.leverage) / entry, bust: Number(p.bustRaw) / scale };
+      return { id: p.id, coin, isLong: p.isLong, entry, size: (p.margin * p.leverage) / entry, margin: p.margin, leverage: p.leverage, bust: Number(p.bustRaw) / scale, openedAtMs: p.openedAtMs };
     });
 }
 

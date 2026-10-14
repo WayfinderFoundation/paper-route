@@ -13,13 +13,89 @@ const BUILDER_MAX_FEE_RATE = "0.02%";
 const MIN_ORDER_USD = 10;
 const TRIGGER_SLIPPAGE = 0.1; // market TP/SL limit price band, as HL's frontend uses
 
+// ---------- staying inside Hyperliquid's request budget ----------
+// Hyperliquid allows 1200 request weight per minute per IP. Paper Route keeps itself to half of
+// that, so the Hyperliquid app or other tools on the same connection still fit. Weights from
+// Hyperliquid's docs: the cheap info requests cost 2, everything else 20. Shared by every client
+// in this worker; a 429 pauses all reads for a while instead of retrying into the limit.
+const BUDGET_PER_MIN = 600;
+const CHEAP = new Set(["clearinghouseState", "spotClearinghouseState", "allMids", "l2Book", "orderStatus", "exchangeStatus"]);
+const COOLDOWN_AFTER_429_MS = 15_000;
+const spent = []; // [time, weight]
+let cooldownUntil = 0;
+
+async function take(weight) {
+  for (;;) {
+    const now = Date.now();
+    while (spent.length && now - spent[0][0] > 60_000) spent.shift();
+    const used = spent.reduce((a, [, w]) => a + w, 0);
+    const wait = Math.max(cooldownUntil - now, used + weight > BUDGET_PER_MIN && spent.length ? spent[0][0] + 60_000 - now : 0);
+    if (wait <= 0) {
+      spent.push([now, weight]);
+      return;
+    }
+    await sleep(Math.min(wait, 5000));
+  }
+}
+
+export const budgetUsed = () => spent.filter(([t]) => Date.now() - t <= 60_000).reduce((a, [, w]) => a + w, 0);
+
+// ---------- one shared price feed ----------
+// Every watcher (Tether, TP/SL, the safety net) listens to the same allMids websocket instead of
+// opening its own, and reads of the mid use it while it's fresh instead of polling.
+const mids = { px: {}, at: 0, listeners: new Map(), sub: null, starting: null };
+
+function startMids() {
+  if (mids.sub || mids.starting) return mids.starting;
+  mids.starting = (async () => {
+    const ws = new WebSocketTransport();
+    const sub = await new SubscriptionClient({ transport: ws }).allMids((e) => {
+      mids.at = Date.now();
+      for (const [c, v] of Object.entries(e.mids)) mids.px[c] = Number(v);
+      for (const [c, fns] of mids.listeners) {
+        const v = mids.px[c];
+        if (v > 0) for (const fn of fns) fn(v);
+      }
+    });
+    mids.sub = { sub, ws };
+  })().finally(() => {
+    mids.starting = null;
+  });
+  return mids.starting;
+}
+
+async function stopMidsIfUnused() {
+  if ([...mids.listeners.values()].some((s) => s.size) || !mids.sub) return;
+  const { sub, ws } = mids.sub;
+  mids.sub = null;
+  await sub.unsubscribe().catch(() => {});
+  await ws.close().catch(() => {});
+}
+
+const freshMid = (coin) => (Date.now() - mids.at < 3000 && mids.px[coin] > 0 ? mids.px[coin] : null);
+
 export function createHl() {
   const transport = new HttpTransport({ timeout: 8000 });
   const info = new InfoClient({ transport });
   let perpMeta = null; // coin -> { asset, szDecimals, maxLeverage }
   let usdcToken = null;
 
-  const read = (label, fn) => withRetry(fn, { label: `Hyperliquid ${label}` });
+  // `kinds`: the info request types this read makes, for the budget
+  const read = (label, fn, kinds = [label]) =>
+    withRetry(
+      async () => {
+        await take(kinds.reduce((a, k) => a + (CHEAP.has(k) ? 2 : 20), 0));
+        try {
+          return await fn();
+        } catch (err) {
+          if (/429/.test(String(err?.message)) || err?.response?.status === 429) cooldownUntil = Date.now() + COOLDOWN_AFTER_429_MS;
+          throw err;
+        }
+      },
+      { label: `Hyperliquid ${label}` },
+    );
+  const assetData = new Map(); // `${user}:${coin}` → { at, value }: leverage + available-to-trade, the expensive read
+  const ASSET_DATA_MS = 15_000;
 
   async function loadMeta() {
     if (perpMeta) return perpMeta;
@@ -37,23 +113,37 @@ export function createHl() {
   }
 
   async function mid(coin) {
-    const mids = await read("allMids", () => info.allMids());
-    return Number(mids[coin]);
+    const cached = freshMid(coin);
+    if (cached) return cached;
+    const all = await read("allMids", () => info.allMids());
+    return Number(all[coin]);
   }
 
-  async function account(user, coin) {
-    const [perp, spot, mids, active] = await read("account", () =>
-      Promise.all([
-        info.clearinghouseState({ user }),
-        info.spotClearinghouseState({ user }),
-        info.allMids(),
-        info.activeAssetData({ user, coin }),
-      ]),
+  // `fresh`: also re-read leverage / available-to-trade (needed right before an order); otherwise
+  // that 20-weight read is reused for up to 15 s, and the mid comes from the shared websocket
+  async function account(user, coin, { fresh = false } = {}) {
+    const key = `${user}:${coin}`;
+    const cachedActive = assetData.get(key);
+    const needActive = fresh || !cachedActive || Date.now() - cachedActive.at > ASSET_DATA_MS;
+    const cachedMid = freshMid(coin);
+    const kinds = ["clearinghouseState", "spotClearinghouseState", ...(cachedMid ? [] : ["allMids"]), ...(needActive ? ["activeAssetData"] : [])];
+    const [perp, spot, allMids, active] = await read(
+      "account",
+      () =>
+        Promise.all([
+          info.clearinghouseState({ user }),
+          info.spotClearinghouseState({ user }),
+          cachedMid ? null : info.allMids(),
+          needActive ? info.activeAssetData({ user, coin }) : cachedActive.value,
+        ]),
+      kinds,
     );
+    if (needActive) assetData.set(key, { at: Date.now(), value: active });
+    const midsNow = allMids ?? { ...mids.px, [coin]: cachedMid };
     const pos = perp.assetPositions.map((p) => p.position).find((p) => p.coin === coin);
     const usdc = spot.balances.find((b) => b.coin === "USDC");
     return {
-      mid: Number(mids[coin]),
+      mid: Number(midsNow[coin]),
       size: pos ? Number(pos.szi) : 0,
       entry: pos ? Number(pos.entryPx) : null,
       uPnl: pos ? Number(pos.unrealizedPnl) : 0,
@@ -73,7 +163,7 @@ export function createHl() {
         coin: p.coin,
         size: Number(p.szi),
         entry: Number(p.entryPx),
-        mark: Number(mids[p.coin]),
+        mark: Number(midsNow[p.coin]),
         value: Number(p.positionValue),
         uPnl: Number(p.unrealizedPnl),
         roe: Number(p.returnOnEquity),
@@ -84,7 +174,7 @@ export function createHl() {
       })),
       spot: spot.balances
         .filter((b) => Number(b.total) > 0)
-        .map((b) => ({ coin: b.coin, total: Number(b.total), hold: Number(b.hold), usd: b.coin === "USDC" ? Number(b.total) : Number(b.total) * Number(mids[b.coin] ?? mids[`@${b.token}`] ?? NaN) })),
+        .map((b) => ({ coin: b.coin, total: Number(b.total), hold: Number(b.hold), usd: b.coin === "USDC" ? Number(b.total) : Number(b.total) * Number(midsNow[b.coin] ?? midsNow[`@${b.token}`] ?? NaN) })),
     };
   }
 
@@ -224,15 +314,14 @@ export function createHl() {
   }
 
   // Low-latency mids over HL's websocket (auto-reconnects and re-subscribes).
+  // listens on the shared price feed; the returned function stops listening
   async function subscribeMid(coin, onMid) {
-    const ws = new WebSocketTransport();
-    const sub = await new SubscriptionClient({ transport: ws }).allMids((e) => {
-      const v = Number(e.mids[coin]);
-      if (v > 0) onMid(v);
-    });
+    if (!mids.listeners.has(coin)) mids.listeners.set(coin, new Set());
+    mids.listeners.get(coin).add(onMid);
+    await startMids();
     return async () => {
-      await sub.unsubscribe().catch(() => {});
-      await ws.close().catch(() => {});
+      mids.listeners.get(coin)?.delete(onMid);
+      await stopMidsIfUnused();
     };
   }
 
