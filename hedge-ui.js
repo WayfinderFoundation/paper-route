@@ -17,7 +17,7 @@
   const card = el("section", "hedge");
   card.innerHTML = `
     <div class="sec-h hedge-h" data-act="toggle">
-      <span class="cap" data-tip="Tether links your papertrade position to an opposite position on Hyperliquid, so price moves cancel out. Click to collapse this section.">Tether ⓘ</span>
+      <span class="cap" data-tip="Tether links your papertrade position to an opposite position on Hyperliquid, so price moves cancel out. Click to collapse this section.">${hud.chevron}Tether</span>
       <span class="hx-chips"><span class="badge hx-status">—</span><span class="badge hx-signer">—</span></span>
     </div>
     <div class="hx-body">
@@ -29,7 +29,7 @@
       </div>
       <button class="pbtn primary hx-tether-on" data-act="tether-on" hidden data-tip="Hyperliquid will follow every papertrade position on this coin: it opens and closes the opposite side when papertrade's orders fill.">Turn on Tether</button>
       <div class="hx-lev">
-        <span class="lbl" data-tip="Leverage for the Hyperliquid hedge. Higher leverage needs less margin but puts Hyperliquid's liquidation closer. Applied on Hyperliquid before the next hedge order.">HL leverage</span>
+        <span class="lbl" data-tip="Leverage for the Hyperliquid hedge only (papertrade's is set on its ticket). Higher uses less margin but moves Hyperliquid's liquidation closer; HL liq turns red if it gets too near papertrade's bust. The dot shows what's live on Hyperliquid.">Hyperliquid leverage</span>
         <div class="seg hx-levs"></div>
         <div class="seg hx-mode"><button data-act="mode" data-cross="1" data-tip="Cross margin: the hedge can use all free USDC in your Hyperliquid account. Liquidation is further away.">Cross</button><button data-act="mode" data-cross="0" data-tip="Isolated margin: only the margin put on this position can be lost. Liquidation is closer.">Iso</button></div>
       </div>
@@ -44,6 +44,7 @@
           <div class="hx-delta-t"><span class="hx-dtext">—</span><span class="hx-pct">—</span></div>
         </div>
         <div class="hx-plan"></div>
+        <div class="hx-fast" data-tip="Papertrade queues opens and closes, sometimes for minutes. Higher-notional orders tend to be filled sooner, so a bigger size usually means less waiting. Size is capped by both venues' balances and your max hedge setting."></div>
         <div class="hx-actions">
           <button class="pbtn primary" data-act="hedge" data-tip="One-off: trade Hyperliquid now so it exactly offsets your papertrade position. Asks you to confirm first.">Hedge to 100%</button>
           <label class="switch" data-tip="Tether on: Hyperliquid follows papertrade automatically. When a papertrade open or close fills (after papertrade's queue), Hyperliquid opens or closes the opposite side."><input type="checkbox" class="hx-auto" /><span></span><em>Tether</em></label>
@@ -60,15 +61,16 @@
           <summary data-tip="Balances on both venues, moving USDC between them, and every position on your Hyperliquid account"><span class="lbl">Accounts &amp; transfers</span><span class="hx-accts-sum"></span><span class="hx-chev">›</span></summary>
           <div class="hx-accts-b">
         <div class="hx-bal">
-          <div data-tip="USDC in papertrade that's free for new positions"><span class="lbl">Paper avail.</span><b class="hx-ptav">—</b><small class="hx-ptq"></small></div>
-          <div data-tip="Your Hyperliquid account value, and how much is free for more hedging or can be withdrawn"><span class="lbl">HL equity</span><b class="hx-hleq">—</b><small class="hx-hlw"></small></div>
+          <div data-tip="USDC in papertrade that's free for new positions. Queued means a deposit papertrade hasn't credited yet."><span class="lbl">Papertrade</span><b class="hx-ptav">—</b><small class="hx-ptq"></small></div>
+          <div data-tip="Equity is your whole Hyperliquid account value, including open P&L. Free to trade is the margin a new hedge on this coin can use (what sizing uses). Withdrawable is what can leave Hyperliquid right now."><span class="lbl">Hyperliquid</span><b class="hx-hleq">—</b><small class="hx-hlw"></small></div>
         </div>
         <div class="hx-rebal">
-          <span class="hx-sugg" data-tip="Keeps Hyperliquid's liquidation a safe multiple further away than papertrade's bust, and enough USDC on papertrade for your next trade">—</span>
+          <div class="hx-sub"><span class="lbl" data-tip="Move USDC between your Hyperliquid wallet and your papertrade account. Paper Route suggests an amount that keeps Hyperliquid's liquidation a safe multiple further away than papertrade's bust, and enough on papertrade for your next trade.">Move funds between wallets</span></div>
+          <span class="hx-sugg">—</span>
           <div class="hx-rebal-row">
             <input class="field hx-amt" type="number" min="1" step="1" placeholder="USDC" data-tip="Amount of USDC to move" />
-            <button class="pbtn" data-act="toPt" data-tip="Send USDC from your Hyperliquid account to your papertrade deposit address. You'll paste your key to sign it; it isn't saved.">→ Papertrade</button>
-            <button class="pbtn" data-act="toHl" data-tip="Opens papertrade's own Withdraw dialog. Papertrade's wallet signs its withdrawals, so you finish it there.">→ Hyperliquid</button>
+            <button class="pbtn" data-act="toPt" data-tip="Send USDC from your Hyperliquid account to your papertrade deposit address. You'll paste your key to sign it; it isn't saved.">To papertrade</button>
+            <button class="pbtn" data-act="toHl" data-tip="Opens papertrade's own Withdraw dialog. Papertrade's wallet signs its withdrawals, so you finish it there.">To Hyperliquid</button>
           </div>
         </div>
         <div class="hx-acct-slot"></div>
@@ -81,7 +83,7 @@
       </div>
       <div class="hx-alerts"></div>
     </div>`;
-  hud.body.append(card);
+  hud.body.insertBefore(card, hud.flow); // the hedge leads; order flow is an optional extra below
 
   // ---------- Hyperliquid positions, inside "Accounts & transfers" ----------
   const acct = el("div", "hlacct");
@@ -149,7 +151,7 @@
 
   const q = (s) => card.querySelector(s);
   const ui = Object.fromEntries(
-    ["hx-signer", "hx-empty", "hx-main", "hx-pt", "hx-hl", "hx-dtext", "hx-pct", "hx-auto", "hx-ptpnl", "hx-hlpnl", "hx-net-pnl", "hx-bust", "hx-liq", "hx-ptav", "hx-ptq", "hx-hleq", "hx-hlw", "hx-sugg", "hx-amt", "hx-confirm", "hx-confirm-t", "hx-unlock", "hx-pass", "hx-alerts", "hx-levs", "hx-mode", "hx-plan", "hx-netline", "hx-status", "hx-status-t", "hx-xkey", "hx-tether-on"].map((c) => [c, q(`.${c}`)]),
+    ["hx-signer", "hx-empty", "hx-main", "hx-pt", "hx-hl", "hx-dtext", "hx-pct", "hx-auto", "hx-ptpnl", "hx-hlpnl", "hx-net-pnl", "hx-bust", "hx-liq", "hx-ptav", "hx-ptq", "hx-hleq", "hx-hlw", "hx-sugg", "hx-amt", "hx-confirm", "hx-confirm-t", "hx-unlock", "hx-pass", "hx-alerts", "hx-levs", "hx-mode", "hx-plan", "hx-netline", "hx-status", "hx-status-t", "hx-xkey", "hx-tether-on", "hx-fast"].map((c) => [c, q(`.${c}`)]),
   );
   const deltaFill = q(".hx-delta .bar i");
   const hedgeBtn = q('[data-act="hedge"]');
@@ -315,9 +317,11 @@
     return { clicked: true, clickMs: Date.now(), hidden: document.hidden };
   }
 
-  function flash(level, text) {
-    const a = el("div", `hx-alert ${level}`, text);
-    ui["hx-alerts"].prepend(a);
+  // Results show next to the control that caused them (`near`); engine alerts go to the card's foot.
+  function flash(level, text, near = null) {
+    const a = el("div", `hx-alert ${level}${near ? " near" : ""}`, text);
+    if (near) near.after(a);
+    else ui["hx-alerts"].prepend(a);
     setTimeout(() => a.remove(), 8000);
   }
 
@@ -368,7 +372,7 @@
     if (!snap) {
       ui["hx-main"].hidden = true;
       ui["hx-empty"].hidden = false;
-      ui["hx-empty"].textContent = port ? "Waiting for hedge engine…" : "Hedge engine not loaded — rebuild the extension (npm run build).";
+      ui["hx-empty"].textContent = port ? "Waiting for hedge engine…" : "Hedge engine not loaded. Rebuild the extension (npm run build).";
       ui["hx-signer"].textContent = "—";
       setStatus("Offline", "", "The extension's background worker isn't connected. Reload papertrade.");
       return;
@@ -394,7 +398,7 @@
     if (s.lockedBy) {
       ui["hx-main"].hidden = true;
       ui["hx-empty"].hidden = false;
-      ui["hx-empty"].textContent = `Still managing ${s.settings.coin} (${s.lockedBy === "round" ? "a hedged trade is running" : "Tether is holding an open position"}) — open the ${s.settings.coin} page to see it. ${s.pageCoin} takes over once it's flat.`;
+      ui["hx-empty"].textContent = `Still managing ${s.settings.coin} (${s.lockedBy === "round" ? "a hedged trade is running" : "Tether is holding an open position"}). Open the ${s.settings.coin} page to see it. ${s.pageCoin} takes over once it's flat.`;
       return;
     }
     if (!s.settings.ptWallet || !s.settings.hedgeWallet) {
@@ -446,21 +450,21 @@
     renderSafetyNet();
 
     ui["hx-ptav"].textContent = usd(pt.available);
-    ui["hx-ptq"].textContent = pt.queued > 0 ? `${usd(pt.queued)} queued` : "";
+    ui["hx-ptq"].textContent = pt.queued > 0 ? `available · ${usd(pt.queued)} queued` : "available";
     ui["hx-hleq"].textContent = Number.isFinite(h.equity) ? usd(h.equity) : "—";
     // margin HL will still let us use for a new hedge (per side; the hedge side is what matters)
     const hedgeIdx = pt.netSize > 0 ? 1 : pt.netSize < 0 ? 0 : null;
     const free = hedgeIdx === null ? Math.min(...h.availableToTrade) : h.availableToTrade[hedgeIdx];
-    ui["hx-hlw"].textContent = `${usd(free)} free to trade · ${usd(h.outable ?? h.withdrawable)} withdrawable`;
+    ui["hx-hlw"].textContent = `equity\n${usd(free, 0)} free to trade\n${usd(h.outable ?? h.withdrawable, 0)} withdrawable`;
 
     const sg = s.suggestion;
     ui["hx-sugg"].textContent = !sg
       ? "—"
       : sg.direction === "toPapertrade"
-        ? `Suggest moving $${sg.amount} → papertrade (HL keeps ${usd(sg.hlRequired, 0)} for a ${s.settings.marginK}× buffer)`
+        ? `Suggested: move $${sg.amount} to papertrade. Hyperliquid keeps ${usd(sg.hlRequired, 0)} for a ${s.settings.marginK}× liquidation buffer.`
         : sg.direction === "toHyperliquid"
-          ? `HL is $${Math.ceil(-sg.hlExcess)} short of a ${s.settings.marginK}× buffer — move $${sg.amount} → Hyperliquid`
-          : "Balances are on target";
+          ? `Suggested: move $${sg.amount} to Hyperliquid. It's $${Math.ceil(-sg.hlExcess)} short of a ${s.settings.marginK}× liquidation buffer.`
+          : "No transfer needed: both wallets hold what they need. You can still move USDC either way.";
     if (sg?.direction && !ui["hx-amt"].value) ui["hx-amt"].placeholder = String(sg.amount);
     for (const b of card.querySelectorAll('[data-act="toPt"], [data-act="toHl"]')) b.disabled = !!s.busy;
 
@@ -522,6 +526,7 @@
       const t = readTicket();
       if (!t) {
         ui["hx-plan"].textContent = "";
+        ui["hx-fast"].textContent = "";
         return;
       }
       paperLong = t.isLong;
@@ -529,6 +534,7 @@
       source = `Ticket ${usd(t.margin, 0)} × ${t.leverage}x`;
     }
     const size = notional / h.mid;
+    ui["hx-fast"].textContent = pt.netSize === 0 ? "Larger papertrade orders usually fill faster and can skip its waiting queue." : "";
     ui["hx-plan"].replaceChildren(
       el("span", "lbl", source),
       el("span", "hx-plan-v", `Paper ${paperLong ? "long" : "short"} ${usdK(notional)} → HL ${paperLong ? "short" : "long"} ${qty(size)} ${coin} · ${usdK(notional / lev)} margin at ${lev}x`),
@@ -616,8 +622,13 @@
   }, true);
 
   // ---------- actions ----------
-  function confirm(text, run, { needsKey = false } = {}) {
+  // The one confirm row moves to sit directly under the control that asked for it (`anchor`),
+  // so it's never below the fold.
+  let confirmAnchor = null;
+  function confirm(text, run, { needsKey = false, anchor } = {}) {
     pendingConfirm = run;
+    confirmAnchor = anchor;
+    anchor.after(ui["hx-confirm"]);
     ui["hx-confirm-t"].textContent = text;
     ui["hx-xkey"].hidden = !needsKey;
     ui["hx-xkey"].value = "";
@@ -640,9 +651,9 @@
       if (act === "toggle") card.classList.toggle("collapsed");
       else if (act === "tether-on") {
         await send("setAuto", { on: true });
-        flash("ok", "Tether on: papertrade fills are now hedged on Hyperliquid");
+        flash("ok", "Tether on: papertrade fills are now hedged on Hyperliquid", ui["hx-tether-on"]);
       }
-      else if (act === "hedge") confirm(hedgePreview(), () => send("hedgeNow"));
+      else if (act === "hedge") confirm(hedgePreview(), () => send("hedgeNow"), { anchor: q(".hx-actions") });
       else if (act === "lev" || act === "mode") {
         const btn = e.target.closest("[data-act]");
         const leverage = act === "lev" ? Number(btn.dataset.lev) : snap.settings.hlLeverage;
@@ -651,8 +662,9 @@
         confirm(
           live
             ? `Set ${snap.settings.coin} leverage on Hyperliquid to ${leverage}x ${cross ? "cross" : "isolated"}`
-            : `Save ${leverage}x ${cross ? "cross" : "isolated"} — applied on Hyperliquid before the first hedge order`,
+            : `Save ${leverage}x ${cross ? "cross" : "isolated"}. It's applied on Hyperliquid before the first hedge order.`,
           () => send("setLeverage", { leverage, cross }),
+          { anchor: q(".hx-lev") },
         );
       }
       else if (act === "toPt") {
@@ -669,7 +681,7 @@
             if (needsKey && !secret.secret) throw new Error("Paste your key to sign the transfer");
             return send("sendToPapertrade", { amount, secret });
           },
-          { needsKey },
+          { needsKey, anchor: q(".hx-rebal-row") },
         );
       } else if (act === "toHl") openPapertradeWithdraw();
       else if (act === "confirm") {
@@ -678,7 +690,7 @@
         ui["hx-confirm"].hidden = true;
         await run();
         ui["hx-xkey"].value = "";
-        flash("ok", "Done");
+        flash("ok", "Done", confirmAnchor);
       } else if (act === "cancel") {
         pendingConfirm = null;
         ui["hx-confirm"].hidden = true;
@@ -687,7 +699,8 @@
         ui["hx-pass"].value = "";
       }
     } catch (err) {
-      flash("error", String(err.message || err));
+      const near = { lev: q(".hx-lev"), mode: q(".hx-lev"), hedge: q(".hx-actions"), toPt: q(".hx-rebal-row"), toHl: q(".hx-rebal-row"), "tether-on": ui["hx-tether-on"], unlock: ui["hx-unlock"] }[act];
+      flash("error", String(err.message || err), near ?? confirmAnchor);
     }
   });
 
@@ -696,7 +709,7 @@
       await send("setAuto", { on: e.target.checked });
     } catch (err) {
       e.target.checked = false;
-      flash("error", String(err.message || err));
+      flash("error", String(err.message || err), q(".hx-actions"));
     }
   });
 
@@ -707,7 +720,7 @@
     if (!btn) throw new Error("Couldn't find papertrade's Withdraw button");
     btn.click();
     const amount = ui["hx-amt"].value || ui["hx-amt"].placeholder;
-    flash("warn", `Withdraw $${amount} in papertrade, then send it from ${short(snap.settings.ptWallet)} to the hedge wallet ${short(snap.settings.hedgeWallet)}`);
+    flash("warn", `Withdraw $${amount} in papertrade, then send it from ${short(snap.settings.ptWallet)} to the hedge wallet ${short(snap.settings.hedgeWallet)}`, q(".hx-rebal-row"));
   }
 
   render();

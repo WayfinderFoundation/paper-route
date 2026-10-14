@@ -12,6 +12,8 @@
     "M15.9,0C7.1,0,0,7.2,0,16s7.1,16,15.9,16,15.9-7.2,15.9-16S24.6,0,15.9,0ZM15.9,3.4c6.5,0,11.8,4.9,12.4,11.2h-5.7c0,0-.2,0-.2,0l-4-4c0,0-.1,0-.2,0h-4.7c0,0-.1,0-.2,0l-4,4c0,0-.1,0-.2,0H3.4c.7-6.3,6-11.2,12.4-11.2ZM15.9,28.6c-2.4,0-4.6-.7-6.5-1.8l2.4-2.4c0,0,.1,0,.2,0h7.9c0,0,.1,0,.2,0l2.4,2.4c-1.9,1.2-4.1,1.8-6.5,1.8ZM25.3,24.3h-4.8c0,0-.1,0-.2,0l-2.6-2.6c0,0-.1,0-.2,0h-3.1c0,0-.1,0-.2,0l-2.6,2.6c0,0-.1,0-.2,0h-4.8c-.1-.1-.2-.3-.3-.4l3.6-3.7c0,0,.1,0,.2,0h11.8c0,0,.1,0,.2,0l3.7,3.7c-.1.1-.2.3-.3.4ZM27.7,20.1h-5.1c0,0-.1,0-.2,0l-4-4c0,0-.1,0-.2,0h-4.7c0,0-.1,0-.2,0l-4,4c0,0-.1,0-.2,0h-5.1c-.2-.4-.3-.9-.4-1.3h1.9c0,0,.1,0,.2,0l4-4c0,0,.1,0,.2,0h11.8c0,0,.1,0,.2,0l4,4c0,0,.1,0,.2,0h1.9c-.1.5-.2.9-.4,1.3Z";
   const ICON_CHART =
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12l3.5-4 3 2.5L14 4"/><path d="M10.5 4H14v3.5"/></svg>';
+  const ICON_CHEVRON =
+    '<svg class="sec-chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4"/></svg>';
   const ICON_COLLAPSE =
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 8h8"/></svg>';
 
@@ -87,7 +89,7 @@
     <div class="head">
       <div class="head-l">
         <span class="logo-tile"><svg class="logo" viewBox="0 0 31.7 32"><path fill="#8B2020" d="${MARK_PATH}"/></svg></span>
-        <span class="cap">Paper Route</span>
+        <span class="cap">Paper Route HUD</span>
       </div>
       <svg class="grip" viewBox="0 0 16 6"><circle cx="2" cy="1.5" r="1"/><circle cx="8" cy="1.5" r="1"/><circle cx="14" cy="1.5" r="1"/><circle cx="2" cy="4.5" r="1"/><circle cx="8" cy="4.5" r="1"/><circle cx="14" cy="4.5" r="1"/></svg>
       <div class="head-r">
@@ -102,14 +104,18 @@
           <span class="mkt-row" data-tip="Hyperliquid's mid price. Papertrade fills at this price, so it's the price your stops and take profits use."><b class="mkt">—</b><span class="tag">Hyperliquid mid</span></span>
           <span class="px">—</span>
         </div>
-        <div class="stat" data-tip="How fast the market is moving: 10-minute volatility of 1-second moves. Calm, normal or wild. The order-flow read is least reliable when it's wild."><span class="lbl">Regime</span><span class="regime">—</span></div>
       </div>
-      <section class="flow">
-        <div class="sec-h"><span class="cap" data-tip="A live read of Hyperliquid's order book and trades. It leans toward which way the next few seconds of price are likelier to go. It's small (about 1 bp at its strongest) and isn't a trading signal on its own.">Order flow ⓘ</span><span class="cap-r fx-lead" data-tip="IC = how well this read has matched the next moves historically (0 = no skill, 1 = perfect)">—</span></div>
+      <section class="flow collapsed">
+        <div class="sec-h" data-act="toggle"><span class="cap" data-tip="What it's for: timing a short-term entry. It reads Hyperliquid's order book and trades and leans toward which way price is likelier to go over the next 10 to 60 seconds. Use it for which side to enter right now, not for a longer-term view: the edge fades after about a minute, and even the strongest lean is about 1 bp.">${ICON_CHEVRON}Order flow</span><span class="cap-r fx-lead" data-tip="Which way the order flow leans right now, for the next 10 to 60 seconds">—</span></div>
+        <div class="fx-lean" data-tip="Long when the book and trades lean up, short when they lean down. Only a short-term lean: it says nothing about where price goes after a minute or so.">
+          <span class="fx-lean-v">—</span>
+          <span class="fx-lean-t">—</span>
+        </div>
+        <div class="fx-regime" data-tip="How fast the market is moving: 10-minute volatility of 1-second moves. Calm, normal or wild. The order-flow read is least reliable when it's wild."><span class="lbl">Volatility</span><span class="regime">—</span></div>
         <div class="fx-gauge" data-tip="−100 to +100. Green = the book and trades lean up, red = down, grey = no clear lean."><div class="fx-track"><i class="fx-fill"></i><b class="fx-needle"></b></div><span class="fx-score">—</span></div>
         <div class="ladder" data-tip="Expected move and price in 10, 30 and 60 seconds according to the order-flow read"></div>
         <details class="fx-more">
-          <summary data-tip="The order-book and trade readings the index is built from">See more <span class="hx-chev">›</span></summary>
+          <summary data-tip="The order-book and trade readings the lean is built from">See the inputs <span class="hx-chev">›</span></summary>
           <div class="fx-comps"></div>
         </details>
         <div class="fx-note"></div>
@@ -153,7 +159,7 @@
   const $ = (sel) => hud.querySelector(sel);
   const els = {
     mkt: $(".mkt"), dot: $(".dot"), liveTxt: $(".livetxt"), px: $(".ref .px"), regime: $(".regime"),
-    lead: $(".fx-lead"), fill: $(".fx-fill"), needle: $(".fx-needle"), score: $(".fx-score"),
+    lead: $(".fx-lead"), leanV: $(".fx-lean-v"), leanT: $(".fx-lean-t"), fill: $(".fx-fill"), needle: $(".fx-needle"), score: $(".fx-score"),
     ladder: $(".ladder"), comps: $(".fx-comps"), note: $(".fx-note"), meta: $(".meta"), err: $(".err"),
     chartBtn: $('[data-act="chart"]'),
   };
@@ -262,12 +268,25 @@
       els.fill.style.width = "0";
       els.needle.style.left = "50%";
       els.ladder.hidden = true;
-      els.note.textContent = "No published index weights for this market yet — the components above are live, the combined score isn't.";
+      els.leanV.textContent = "No lean";
+      els.leanV.className = "fx-lean-v";
+      els.leanT.textContent = "No model for this market yet";
+      els.note.textContent = "No published index weights for this market yet. The inputs are live, the combined lean isn't.";
       return;
     }
     const s = idx.score;
     const leadH = idx.horizons.find((h) => h.s === idx.lead);
-    els.lead.textContent = `${idx.lead}s lean${leadH?.ic != null ? ` · IC ${leadH.ic.toFixed(2)}` : ""}${f.provisional ? " · provisional" : ""}`;
+    // the plain answer to "long or short?": which side the next 10-60 s lean, if any
+    const leaning = Math.abs(s) < LEAN_AT ? null : s > 0 ? "long" : "short";
+    const fastest = shownHorizons(f)[0];
+    els.lead.textContent = leaning ? `Leans ${leaning}` : "No clear lean";
+    els.lead.className = `cap-r fx-lead ${leaning === "long" ? "up" : leaning === "short" ? "dn" : ""}`;
+    els.leanV.textContent = leaning ? `Leans ${leaning}` : "No clear lean";
+    els.leanV.className = `fx-lean-v ${leaning === "long" ? "up" : leaning === "short" ? "dn" : ""}`;
+    els.leanT.textContent = leaning
+      ? `Next ${fastest?.s ?? idx.lead}–60s${fastest ? ` · ${fmtBps(fastest.ret_bps)} bp expected` : ""}${f.provisional ? " · provisional" : ""}`
+      : `Too weak to call either way${f.provisional ? " · provisional" : ""}`;
+    els.leanT.dataset.tip = leadH?.ic != null ? `IC ${leadH.ic.toFixed(2)} at ${idx.lead}s: how well this read has matched the next moves historically (0 = no skill, 1 = perfect)` : "";
     els.score.textContent = `${s >= 0 ? "+" : "−"}${Math.abs(s).toFixed(0)}`;
     els.score.className = `fx-score ${Math.abs(s) < LEAN_AT ? "" : s > 0 ? "up" : "dn"}`;
     const w = Math.abs(s) / 100;
@@ -677,9 +696,12 @@
   connectPort();
 
   // ---------- interaction ----------
-  chrome.storage.local.get({ hudPos: null, hudCollapsed: false, overlayEnabled: true }).then((s) => {
+  // order flow starts folded: it's an optional timing aid, so the hedge comes first
+  const flowSec = hud.querySelector("section.flow");
+  chrome.storage.local.get({ hudPos: null, hudCollapsed: false, overlayEnabled: true, flowOpen: false }).then((s) => {
     if (s.hudPos) Object.assign(hud.style, { left: `${s.hudPos.left}px`, top: `${s.hudPos.top}px` });
     hud.classList.toggle("collapsed", s.hudCollapsed);
+    flowSec.classList.toggle("collapsed", !s.flowOpen);
     state.overlayEnabled = s.overlayEnabled;
     schedule();
   });
@@ -689,6 +711,8 @@
     if (act === "collapse") {
       const collapsed = hud.classList.toggle("collapsed");
       chrome.storage.local.set({ hudCollapsed: collapsed });
+    } else if (act === "toggle" && e.target.closest("section") === flowSec) {
+      chrome.storage.local.set({ flowOpen: !flowSec.classList.toggle("collapsed") });
     } else if (act === "chart") {
       state.overlayEnabled = !state.overlayEnabled;
       chrome.storage.local.set({ overlayEnabled: state.overlayEnabled });
@@ -728,6 +752,8 @@
   window.__wfHud = {
     root,
     body: hud.querySelector(".body"),
+    flow: flowSec,
+    chevron: ICON_CHEVRON,
     el,
     fmtPx,
     fmtPct,
