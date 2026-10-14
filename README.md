@@ -139,11 +139,11 @@ only works while Chrome is open with Paper Route enabled (see [Keep it running](
 losing closes and liquidations mint PAPER (a liquidation on the full margin), so the form and editor show a
 **Tether on** pill and relabel the two sides:
 
-- **Bank Paper at (SL)** (the stop-loss side, listed first): close both legs once papertrade is down 25 / 50 / 75 % of
-  margin, or **At bust** (the default) to let papertrade liquidate while the [safety net](#safety-net) closes
-  Hyperliquid at the same price.
 - **Win exit (TP)** (the take-profit side): an optional early exit, off by default. A winning close earns
   no PAPER, and while hedged the pair stays neutral if you wait.
+- **Bank Paper at (SL)** (the stop-loss side): close both legs once papertrade is down 25 / 50 / 75 % of
+  margin, or **At bust** (the default) to let papertrade liquidate while the [safety net](#safety-net) closes
+  Hyperliquid at the same price.
 
 With Tether off the pill reads **Tether off** and they work as an ordinary one-sided take profit and stop loss.
 The amount next to each side shows the dollar P&L and how far price has to move: picks are a % of your margin,

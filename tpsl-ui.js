@@ -281,12 +281,6 @@
   function ticketNote() {
     tNote.replaceChildren(triggerNote(), " Paper Route closes once price crosses your level, through papertrade's queue. Keep Chrome open.");
   }
-  // the exit you're aiming for goes first: Bank Paper in Paper mode, take profit otherwise
-  function orderRows(box, tp, sl, before) {
-    const [a, b] = paperMode() ? [sl.el, tp.el] : [tp.el, sl.el];
-    box.insertBefore(a, before);
-    box.insertBefore(b, before);
-  }
   ticketNote();
   tBody.append(tTp.el, tSl.el, tNote);
   const tPending = document.createElement("div");
@@ -399,10 +393,10 @@
       : x ? "Stop loss / take profit watched by Paper Route. Click to edit." : "Add a stop loss or take profit (watched by Paper Route)";
     if (!x) return chip.append(paper ? "Exits" : "TP/SL");
     if (x.state === "closing") return chip.append(`Closing (${x.reason})…`);
-    // Paper mode: the loss level is the goal, so it leads and takes the positive colour
+    // TP then SL in both modes; in Paper mode the loss level is the goal, so it takes the positive colour
     const slSpan = x.slPx != null && Object.assign(document.createElement("span"), { className: paper ? "tp" : "sl", textContent: `${paper ? "Paper at" : "SL"} ${fmtPxShow(x.slPx)}` });
     const tpSpan = x.tpPx != null && Object.assign(document.createElement("span"), { className: paper ? "sl" : "tp", textContent: `${paper ? "Win exit" : "TP"} ${fmtPxShow(x.tpPx)}` });
-    const parts = (paper ? [slSpan, tpSpan] : [tpSpan, slSpan]).filter(Boolean);
+    const parts = [tpSpan, slSpan].filter(Boolean);
     parts.forEach((sp, i) => chip.append(...(i ? [" · ", sp] : [sp])));
   }
 
@@ -464,7 +458,7 @@
       actions.append(save, remove);
       eTp.sync();
       eSl.sync();
-      editor.append(...(paperMode() ? [eSl.el, eTp.el] : [eTp.el, eSl.el]), err, actions);
+      editor.append(eTp.el, eSl.el, err, actions);
       const tether = s.auto ? " Tether closes the Hyperliquid side when papertrade's close fills." : " Hyperliquid isn't touched.";
       const note = hud.el("p", "pe-note");
       note.append(triggerNote(), ` Paper Route closes once price crosses your level, through papertrade's queue. Keep Chrome open.${tether}`);
@@ -506,7 +500,6 @@
     renderPending(s);
     if (paperMode() !== lastPaper) {
       lastPaper = paperMode();
-      orderRows(tBody, tTp, tSl, tNote);
       modeLine(tMode);
       ticketNote();
       for (const r of [tTp, tSl, eTp, eSl]) r.sync();
