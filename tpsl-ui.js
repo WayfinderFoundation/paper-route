@@ -5,10 +5,10 @@
 // Each side has two linked fields, like Hyperliquid's and Bybit's tickets: a trigger price and a
 // gain/loss as % return on margin or $ P&L. Whichever was edited last is what's kept.
 (() => {
-  const hud = window.__wfHud;
-  const eng = window.__wfHedge;
-  if (!hud || !eng || window.__wfTpslUi) return;
-  window.__wfTpslUi = true;
+  const hud = window.__prHud;
+  const eng = window.__prHedge;
+  if (!hud || !eng || window.__prTpslUi) return;
+  window.__prTpslUi = true;
 
   const ICON = chrome.runtime.getURL("assets/icon16.png");
   const TP_PICKS = [25, 50, 100];
@@ -307,9 +307,11 @@
     const coin = location.pathname.match(/\/trade\/([a-z]+)/i)?.[1]?.toUpperCase();
     tOffline.textContent = !s
       ? "⚠ Paper Route is offline: no TP/SL is being watched. Reload it in chrome://extensions, then refresh this page."
-      : s.exits?.unwatched?.includes(coin)
-        ? `⚠ No ${coin} price for a while: TP/SL can't trigger until it's back (retrying).`
-        : "";
+      : s.pageCheck && !s.pageCheck.ok
+        ? `⚠ Papertrade's page changed (${s.pageCheck.problems.join("; ")}): Paper Route may not be able to close at your levels. Watch your positions.`
+        : s.exits?.unwatched?.includes(coin)
+          ? `⚠ No ${coin} price for a while: TP/SL can't trigger until it's back (retrying).`
+          : "";
     tOffline.hidden = !tOffline.textContent;
   }
 

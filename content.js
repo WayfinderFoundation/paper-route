@@ -2,8 +2,8 @@
 // Market frames (Hyperliquid mid, order-flow features, index) arrive from the service worker over
 // a port every 100 ms; rendering is coalesced to one rAF.
 (() => {
-  if (window.__wfPapertradeOverlay) return;
-  window.__wfPapertradeOverlay = true;
+  if (window.__paperRouteHud) return;
+  window.__paperRouteHud = true;
 
   const STALE_MS = 2000;
   const TOP_PILL_Y = 50; // below papertrade's ticker/OI bar that sits inside the chart box
@@ -295,7 +295,7 @@
     // while the hedge wins it back, so it also names the papertrade side against the lean.
     const up = Math.abs(s) < LEAN_AT ? null : s > 0;
     const tone = up === null ? "" : up ? "up" : "dn";
-    const hedged = !!window.__wfHedge?.snap()?.auto;
+    const hedged = !!window.__prHedge?.snap()?.auto;
     els.lead.textContent = up === null ? "No clear lean" : `Leans ${up ? "up" : "down"}`;
     els.lead.className = `cap-r fx-lead ${tone}`;
     els.leanV.textContent = up === null ? "No clear lean" : `Leans ${up ? "up" : "down"}`;
@@ -644,7 +644,13 @@
       }
       drawOverlay();
     };
-    requestAnimationFrame(flush);
+    if (!state.rafPending) {
+      state.rafPending = true;
+      requestAnimationFrame(() => {
+        state.rafPending = false;
+        flush();
+      });
+    }
     setTimeout(flush, 250);
   }
   setInterval(renderStatus, 250);
@@ -655,7 +661,7 @@
   more.addEventListener("toggle", () => chrome.storage.local.set({ fxMoreOpen: more.open }));
 
   window.addEventListener("message", (e) => {
-    if (e.source !== window || e.data?.type !== "wf-pt-map") return;
+    if (e.source !== window || e.data?.type !== "paper-route-chart") return;
     state.map = e.data;
     schedule(false);
   });
@@ -682,6 +688,7 @@
     }
     state.coin = null;
     followCoin();
+    port.postMessage({ hidden: document.hidden });
     port.onMessage.addListener((f) => {
       if (f.kind !== "market" || f.coin !== state.coin) return;
       state.frame = f;
@@ -715,6 +722,7 @@
     schedule();
   }
   setInterval(followCoin, 500);
+  document.addEventListener("visibilitychange", () => port?.postMessage({ hidden: document.hidden }));
   connectPort();
 
   // ---------- interaction ----------
@@ -771,7 +779,7 @@
   });
 
   // shared with hedge-ui.js, which runs in the same isolated world
-  window.__wfHud = {
+  window.__prHud = {
     root,
     body: hud.querySelector(".body"),
     flow: flowSec,

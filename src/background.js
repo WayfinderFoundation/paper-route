@@ -5,6 +5,9 @@ import { buildSigner } from "./signers.js";
 import { forget, forgetAgent, getSecret, lock, storeSecret, unlock, vaultStatus } from "./vault.js";
 
 const hedgePorts = new Set();
+// tabs that aren't visible get no snapshots (a frozen tab could otherwise queue them up); papertrade
+// actions (exec) still reach them, and they get the latest snapshot when shown again
+const hiddenHedgePorts = new Set();
 let lastPublish = 0;
 let publishTimer = null;
 let latest = null;
@@ -32,7 +35,7 @@ function publish(snapshot) {
     return;
   }
   lastPublish = Date.now();
-  for (const port of hedgePorts) port.postMessage({ kind: "hedge", state: latest });
+  for (const port of hedgePorts) if (!hiddenHedgePorts.has(port)) port.postMessage({ kind: "hedge", state: latest });
 }
 
 // Papertrade actions (open/close) can only run inside a signed-in papertrade tab; try the
@@ -237,7 +240,7 @@ const COMMANDS = {
     const settings = await loadSettings();
     const signer = buildSigner(secret, settings.hedgeWallet);
     const sig = await signer.signTypedData({
-      domain: { name: "Wayfinder Papertrade Overlay", version: "1", chainId: 1337 },
+      domain: { name: "Paper Route", version: "1", chainId: 1337 },
       types: { Ping: [{ name: "at", type: "uint64" }] },
       primaryType: "Ping",
       message: { at: BigInt(Date.now()) },
@@ -253,10 +256,22 @@ async function dispatch(cmd, args) {
 }
 
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== "wf-pt-hedge") return;
+  if (port.name !== "paper-route-hedge") return;
   hedgePorts.add(port);
   port.postMessage({ kind: "hedge", state: engine.snapshot() });
   port.onMessage.addListener(async ({ kind, id, cmd, args, ...rest }) => {
+    if (kind === "visibility") {
+      if (rest.hidden) hiddenHedgePorts.add(port);
+      else {
+        hiddenHedgePorts.delete(port);
+        port.postMessage({ kind: "hedge", state: engine.snapshot() });
+      }
+      return;
+    }
+    if (kind === "pageCheck") {
+      engine.setPageCheck(rest);
+      return;
+    }
     if (kind === "execResult") {
       pendingExec.get(id)?.({ id, ...rest });
       pendingExec.delete(id);
@@ -268,7 +283,10 @@ chrome.runtime.onConnect.addListener((port) => {
       port.postMessage({ kind: "result", id, ok: false, error: String(err.message || err) });
     }
   });
-  port.onDisconnect.addListener(() => hedgePorts.delete(port));
+  port.onDisconnect.addListener(() => {
+    hedgePorts.delete(port);
+    hiddenHedgePorts.delete(port);
+  });
 });
 
 // options page
