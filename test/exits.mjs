@@ -128,6 +128,28 @@ const pos = (id, extra = {}) => ({ id, coin: "BTC", isLong: false, entry: 80_000
 }
 
 {
+  console.log("\n# levels set with a slow order wait as long as papertrade still has it queued");
+  const { w, ctx } = world();
+  ctx.openQueued = () => w.queuedOpen;
+  store.exits = {};
+  store.pendingExit = { coin: "BTC", isLong: true, tp: { kind: "roe", value: 10 }, sl: null, at: Date.now() - 11 * 60_000, knownIds: [] };
+  w.queuedOpen = true;
+  w.positions = [];
+  const x = createExits(ctx);
+  await x.init();
+  await sleep(700);
+  check(!!x.snapshot().pending, "older than 10 min but still queued → kept");
+  w.positions = [pos("60", { isLong: true, openedAtMs: Date.now() })];
+  check(await until(() => x.snapshot().byPosition["60"], 1500), "attached when it finally fills");
+  store.pendingExit = { coin: "BTC", isLong: true, tp: { kind: "roe", value: 10 }, sl: null, at: Date.now() - 11 * 60_000, knownIds: ["60"] };
+  w.queuedOpen = false;
+  const y = createExits(ctx);
+  await y.init();
+  await sleep(700);
+  check(!y.snapshot().pending && w.alerts.some((a) => /never filled/.test(a.text)), "older than 10 min and no queued order → expires with an alert");
+}
+
+{
   console.log("\n# a level the price is already past is refused");
   const { w, ctx } = world();
   store.exits = {};
