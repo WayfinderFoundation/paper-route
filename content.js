@@ -7,7 +7,11 @@
 
   const STALE_MS = 2000;
   const TOP_PILL_Y = 50; // below papertrade's ticker/OI bar that sits inside the chart box
-  const LEAN_AT = 40; // |index| from which the projection takes a colour instead of grey
+  // Lean colours, from the holdout (Sep 29–Oct 13): calls at |index| ≥ 40 beat the model's average hit rate (80 % vs
+  // 71.5 % over 10 s; 71 % vs 65.5 % acting 2 s later); from 60 they hit 82 % / 71 %. Grey below 40, a softer colour
+  // at 40–60, full colour from 60. In the wild volatility regime calls hit only ~61 % acting 2 s later: dimmed.
+  const LEAN_AT = 40;
+  const STRONG_AT = 60;
   const MARK_PATH =
     "M15.9,0C7.1,0,0,7.2,0,16s7.1,16,15.9,16,15.9-7.2,15.9-16S24.6,0,15.9,0ZM15.9,3.4c6.5,0,11.8,4.9,12.4,11.2h-5.7c0,0-.2,0-.2,0l-4-4c0,0-.1,0-.2,0h-4.7c0,0-.1,0-.2,0l-4,4c0,0-.1,0-.2,0H3.4c.7-6.3,6-11.2,12.4-11.2ZM15.9,28.6c-2.4,0-4.6-.7-6.5-1.8l2.4-2.4c0,0,.1,0,.2,0h7.9c0,0,.1,0,.2,0l2.4,2.4c-1.9,1.2-4.1,1.8-6.5,1.8ZM25.3,24.3h-4.8c0,0-.1,0-.2,0l-2.6-2.6c0,0-.1,0-.2,0h-3.1c0,0-.1,0-.2,0l-2.6,2.6c0,0-.1,0-.2,0h-4.8c-.1-.1-.2-.3-.3-.4l3.6-3.7c0,0,.1,0,.2,0h11.8c0,0,.1,0,.2,0l3.7,3.7c-.1.1-.2.3-.3.4ZM27.7,20.1h-5.1c0,0-.1,0-.2,0l-4-4c0,0-.1,0-.2,0h-4.7c0,0-.1,0-.2,0l-4,4c0,0-.1,0-.2,0h-5.1c-.2-.4-.3-.9-.4-1.3h1.9c0,0,.1,0,.2,0l4-4c0,0,.1,0,.2,0h11.8c0,0,.1,0,.2,0l4,4c0,0,.1,0,.2,0h1.9c-.1.5-.2.9-.4,1.3Z";
   const ICON_CHART =
@@ -224,10 +228,23 @@
     return (f.index?.horizons ?? []).filter((h) => h.show).sort((a, b) => a.s - b.s);
   }
 
+  // 0: no lean, 1: lean, 2: strong lean
+  const leanLevel = (s) => (Math.abs(s) < LEAN_AT ? 0 : Math.abs(s) < STRONG_AT ? 1 : 2);
+
   function leanTone(f) {
     const s = f.index?.score ?? 0;
-    return Math.abs(s) < LEAN_AT ? tone.idle : s > 0 ? tone.up : tone.down;
+    const level = leanLevel(s);
+    if (!level) return tone.idle;
+    const base = s > 0 ? tone.up : tone.down;
+    const k = (level === 1 ? 0.65 : 1) * (f.regime === "wild" ? 0.6 : 1);
+    return (a = 1) => base(a * k);
   }
+  // CSS classes for a lean: colour, softer below STRONG_AT, dimmed in a wild market
+  const leanClass = (s, f) => {
+    const level = leanLevel(s);
+    if (!level) return "";
+    return `${s > 0 ? "up" : "dn"}${level === 1 ? " soft" : ""}${f.regime === "wild" ? " dim" : ""}`;
+  };
 
   function renderHud() {
     const f = state.frame;
@@ -294,35 +311,37 @@
     // Plain price direction. With Tether on (hedged on Hyperliquid) a papertrade loss earns Paper
     // while the hedge wins it back, so it also names the papertrade side against the lean.
     const up = Math.abs(s) < LEAN_AT ? null : s > 0;
-    const tone = up === null ? "" : up ? "up" : "dn";
+    const strong = leanLevel(s) === 2;
+    const tone = leanClass(s, f);
     const hedged = !!window.__prHedge?.snap()?.auto;
-    els.lead.textContent = up === null ? "No clear lean" : `Leans ${up ? "up" : "down"}`;
+    const leanText = up === null ? "No clear lean" : `Leans ${up ? "up" : "down"}${strong ? " strongly" : ""}`;
+    els.lead.textContent = leanText;
     els.lead.className = `cap-r fx-lead ${tone}`;
-    els.leanV.textContent = up === null ? "No clear lean" : `Leans ${up ? "up" : "down"}`;
+    els.leanV.textContent = leanText;
     els.leanV.className = `fx-lean-v ${tone}`;
     const span = shownHorizons(f).map((h) => h.s);
     const next = span.length ? `Next ${span[0]}–${span[span.length - 1]}s` : "Next minute";
-    els.leanT.textContent = `${up === null ? "Too weak to call" : next}${up !== null && hedged ? ` · hedged: favours papertrade ${up ? "short" : "long"}` : ""}${f.provisional ? " · provisional" : ""}`;
+    els.leanT.textContent = `${up === null ? "Too weak to call" : next}${up !== null && f.regime === "wild" ? " · less reliable in a wild market" : ""}${up !== null && hedged ? ` · hedged: favours papertrade ${up ? "short" : "long"}` : ""}${f.provisional ? " · provisional" : ""}`;
     els.leanT.dataset.tip = leadH?.ic != null ? `IC ${leadH.ic.toFixed(2)} at ${idx.lead}s: how well this read has matched the next moves historically (0 = no skill, 1 = perfect)` : "";
     els.score.textContent = `${s >= 0 ? "+" : "−"}${Math.abs(s).toFixed(0)}`;
-    els.score.className = `fx-score ${Math.abs(s) < LEAN_AT ? "" : s > 0 ? "up" : "dn"}`;
+    els.score.className = `fx-score ${tone}`;
     const w = Math.abs(s) / 100;
     els.fill.style.width = `${w * 50}%`;
     els.fill.style.left = s >= 0 ? "50%" : `${50 - w * 50}%`;
-    els.fill.className = `fx-fill ${Math.abs(s) < LEAN_AT ? "idle" : s > 0 ? "up" : "dn"}`;
+    els.fill.className = `fx-fill ${tone || "idle"}`;
     els.needle.style.left = `${50 + s / 2}%`;
 
     const hs = shownHorizons(f);
     els.ladder.hidden = !hs.length;
     ensureRows(hs);
     const scale = Math.max(0.3, ...hs.map((h) => Math.abs(h.ret_bps)));
-    const cls = Math.abs(s) < LEAN_AT ? "idle" : s > 0 ? "up" : "dn";
+    const cls = tone || "idle";
     for (const h of hs) {
       const r = rowEls.get(h.s);
       r.bps.textContent = fmtBps(h.ret_bps);
       r.bps.className = `bps ${cls}`;
       r.tp.textContent = fmtPx(f.mid * Math.exp(h.ret_bps / 1e4));
-      r.fill.className = `${h.ret_bps >= 0 ? "up" : "dn"} ${cls === "idle" ? "idle" : ""}`;
+      r.fill.className = `${h.ret_bps >= 0 ? "up" : "dn"} ${cls === "idle" ? "idle" : cls.replace(/^(up|dn) ?/, "")}`;
       r.fill.style.transform = `scaleX(${Math.max(0.04, Math.min(1, Math.abs(h.ret_bps) / scale))})`;
     }
     els.note.textContent = idx.model === "quick"

@@ -643,6 +643,8 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
       return COINS.filter((coin) => known[coin]);
     },
     closeQueued: (id) => (lastPtFrame?.operations ?? []).some((op) => op[1] === "closePositions" && (op[9] ?? []).map(String).includes(id)),
+    // op = [intentId, action, instrumentId, isLong, …]
+    openQueued: (coin, isLong) => (lastPtFrame?.operations ?? []).some((op) => op[1] === "openPosition" && Number(op[2]) === INSTRUMENT_IDS[coin] && !!op[3] === isLong),
     ptLive: () => state.pt.status === "live" && !!lastPtFrame,
     subscribeMid: (coin, fn) => (hl ?? io.createHl()).subscribeMid(coin, fn),
     mid: (coin) => (hl ?? io.createHl()).mid(coin),

@@ -483,3 +483,8 @@ button[data-tip], label[data-tip], input[data-tip] { cursor: pointer; }
 .hx-lane-s.up, .hx-lane-s.warn { color: var(--fg); }
 .hx-lane-legs { margin-left: auto; font-variant-numeric: tabular-nums; }
 .hx-fit { color: var(--fg); }
+
+/* lean strength: full colour from |index| 60, softer at 40–60, dimmed in a wild market */
+.fx-lead.soft, .fx-lean-v.soft, .fx-score.soft, .fx-fill.soft, .row .bps.soft, .row .bar i.soft { opacity: 0.7; }
+.fx-lead.dim, .fx-lean-v.dim, .fx-score.dim, .fx-fill.dim, .row .bps.dim, .row .bar i.dim { opacity: 0.5; }
+.fx-lead.soft.dim, .fx-lean-v.soft.dim, .fx-score.soft.dim, .fx-fill.soft.dim, .row .bps.soft.dim, .row .bar i.soft.dim { opacity: 0.4; }

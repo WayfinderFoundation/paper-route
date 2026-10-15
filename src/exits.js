@@ -11,7 +11,10 @@
 const TICK_MS = 500;
 const CLOSE_RESEND_MS = 6_000;
 const CLOSE_ALERT_MS = 45_000;
-const PENDING_TTL_MS = 10 * 60_000; // a queued open older than this isn't the order the levels were for
+// Levels set with an order wait for it to fill as long as papertrade still has a queued open on that coin and
+// side (its queue can take many minutes after a big move); without one, they expire after PENDING_TTL_MS
+const PENDING_TTL_MS = 10 * 60_000;
+const PENDING_MAX_MS = 2 * 60 * 60_000;
 const MATCH_SLACK_MS = 5_000;
 const PUSH_STALE_MS = 3_000; // no pushed price for this long: fetch one instead
 const POLL_GAP_MS = 2_000;
@@ -43,7 +46,7 @@ export function checkLevels({ isLong, entry, tpPx, slPx }) {
 // ctx: { positions(mids): [{ id, coin, isLong, entry, size, margin, bust, openedAtMs }] (every coin it can
 //        decode; papertrade's raw prices are read against each coin's mid),
 //        readableCoins(mids): coins whose positions(mids) is complete,
-//        closeQueued(id), ptLive(), subscribeMid(coin, fn) → stop, mid(coin) → price (one-off read),
+//        closeQueued(id), openQueued(coin, isLong), ptLive(), subscribeMid(coin, fn) → stop, mid(coin) → price (one-off read),
 //        exec, alert, emit }
 export function createExits(ctx) {
   let exits = {}; // positionId → { coin, isLong, entry, tpPx, slPx, state, reason, closeSentAt, attempts, stateAt }
@@ -190,7 +193,8 @@ export function createExits(ctx) {
 
   function attachPending(positions) {
     if (!pending) return;
-    if (Date.now() - pending.at > PENDING_TTL_MS) {
+    const age = Date.now() - pending.at;
+    if (age > PENDING_MAX_MS || (age > PENDING_TTL_MS && !ctx.openQueued?.(pending.coin, pending.isLong))) {
       ctx.alert("warn", "The TP/SL set with your last order expired: that order never filled on papertrade");
       pending = null;
       save();
