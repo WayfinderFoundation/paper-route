@@ -1,9 +1,9 @@
 // HUD Tether section. Renders hedge-engine snapshots from the service worker and sends
 // commands back. Every fund-moving command goes through an inline confirm row first.
 (() => {
-  const hud = window.__wfHud;
-  if (!hud || window.__wfHedgeUi) return;
-  window.__wfHedgeUi = true;
+  const hud = window.__prHud;
+  if (!hud || window.__prHedgeUi) return;
+  window.__prHedgeUi = true;
   const { el, fmtPx } = hud;
 
   const usd = (v, d = 2) => `${v < 0 ? "−" : ""}$${Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })}`;
@@ -164,6 +164,8 @@
 
   // ---------- port ----------
   let port = null;
+  let lastCheckKey = null; // last page self-check result sent to the worker
+  let lastCheckSentMs = 0;
   let snap = null;
   let nextId = 1;
   const waiting = new Map();
@@ -171,10 +173,13 @@
 
   function connect() {
     try {
-      port = chrome.runtime.connect({ name: "wf-pt-hedge" });
+      port = chrome.runtime.connect({ name: "paper-route-hedge" });
     } catch {
       return; // orphaned after an extension reload; content.js reloads the page
     }
+    port.postMessage({ kind: "visibility", hidden: document.hidden });
+    lastCheckKey = null; // the (possibly restarted) worker needs the page check again
+    setTimeout(runPageCheck, 1000);
     port.onMessage.addListener((msg) => {
       if (msg.kind === "hedge") {
         snap = msg.state;
@@ -198,6 +203,7 @@
     });
   }
   connect();
+  document.addEventListener("visibilitychange", () => port?.postMessage({ kind: "visibility", hidden: document.hidden }));
 
   // The account signed in on papertrade (its wagmi wallet session in this page's localStorage),
   // reported to the worker so trades use it without typing the address into settings.
@@ -234,7 +240,7 @@
 
   // shared with tpsl-ui.js (same isolated world): engine snapshots and commands
   const snapListeners = [];
-  window.__wfHedge = { send: (cmd, args) => send(cmd, args), snap: () => snap, onSnap: (fn) => snapListeners.push(fn), fit: (t) => hedgeFit(t) };
+  window.__prHedge = { send: (cmd, args) => send(cmd, args), snap: () => snap, onSnap: (fn) => snapListeners.push(fn), fit: (t) => hedgeFit(t) };
 
   // Could Hyperliquid carry the hedge for papertrade's ticket, on top of what's already open?
   // Mirrors the checks hedgeLane runs before each order in src/hedge.js (keep in step): free margin
@@ -305,21 +311,93 @@
     });
   }
 
-  async function ptClose({ positionId }) {
-    // exactly the Close button: each row also has "Details for BTC position <id>", which comes first
-    const sel = `button[aria-label^="Close "][aria-label$=" position ${positionId}"]`;
-    let btn = document.querySelector(sel);
-    if (!btn) {
-      // the Close buttons live on the Positions tab
-      [...document.querySelectorAll("button, a")].find((b) => /^Positions/.test(b.textContent.trim()))?.click();
-      await settle(() => !!document.querySelector(sel));
-      btn = document.querySelector(sel);
-    }
-    if (!btn) throw new Error(`Close button for papertrade position ${positionId} not found`);
-    if (btn.disabled) return { pending: btn.textContent.trim() }; // Pending… / Queued… / Confirming…
-    btn.click();
-    return { clicked: true, clickMs: Date.now(), hidden: document.hidden };
+  // Papertrade changes its page without notice: act only on an element that matches exactly once.
+  // Zero or several matches means the page changed, so fail loudly instead of clicking the wrong thing.
+  function one(found, what) {
+    const list = typeof found === "string" ? [...document.querySelectorAll(found)] : found;
+    if (list.length !== 1) throw new Error(`${what}: ${list.length ? `${list.length} matches` : "not found"} (papertrade's page changed)`);
+    return list[0];
   }
+
+  // "Close BTC position 123"; each row also has "Details for BTC position 123", which comes first
+  const closeSelector = (positionId) => `button[aria-label^="Close "][aria-label$=" position ${positionId}"]`;
+  const positionsTab = () => [...document.querySelectorAll("button, a")].filter((b) => /^Positions/.test(b.textContent.trim()));
+
+  async function ptClose({ positionId }) {
+    const sel = closeSelector(positionId);
+    if (!document.querySelector(sel)) {
+      // the Close buttons live on the Positions tab
+      positionsTab()[0]?.click();
+      await settle(() => !!document.querySelector(sel));
+    }
+    const btn = one(sel, `Close button for papertrade position ${positionId}`);
+    if (btn.disabled) return { pending: btn.textContent.trim() }; // Pending… / Queued… / Confirming…
+    const clickMs = Date.now();
+    btn.click();
+    // A click only counts once the close has visibly started: the button turns disabled (Pending… /
+    // Queued…) or disappears. Papertrade may add a confirm step; take it if there is exactly one.
+    const started = () => {
+      const now = document.querySelector(sel);
+      return !now || now.disabled;
+    };
+    if (await settle(started, 1200)) return { clicked: true, clickMs, hidden: document.hidden };
+    const confirms = [...document.querySelectorAll('[role="dialog"] button, [role="alertdialog"] button')].filter(
+      (b) => !b.disabled && /^(confirm|yes|close position|close)$/i.test(b.textContent.trim()),
+    );
+    const again = document.querySelector(sel);
+    if (again && /confirm|sure|yes/i.test(again.textContent)) confirms.push(again);
+    if (confirms.length === 1) {
+      confirms[0].click();
+      if (await settle(started, 2500)) return { clicked: true, clickMs, hidden: document.hidden, confirmed: true };
+    }
+    throw new Error(`Close for papertrade position ${positionId} was clicked but didn't start (button shows "${(document.querySelector(sel)?.textContent ?? "nothing").trim().slice(0, 30)}")`);
+  }
+
+  // ---------- page self-check ----------
+  // Every papertrade element Paper Route clicks or reads must exist exactly once: the Close button of each
+  // open position (stop loss / take profit close through it), the Positions tab, and the order ticket parts
+  // the TP/SL block reads. Checked on load, every 30 s and when papertrade announces a new version; the
+  // worker alerts once per change and the panel shows it until the page passes again.
+  function pageCheck() {
+    if (!/\/trade\//i.test(location.pathname)) return null;
+    const problems = [];
+    const need = (found, what) => {
+      try {
+        one(found, what);
+      } catch (err) {
+        problems.push(err.message.replace(" (papertrade's page changed)", ""));
+      }
+    };
+    need("button.dup", "Long button");
+    need("button.ddn", "Short button");
+    need("input#im", "margin input");
+    need("input#il", "leverage input");
+    need("#preTrade", "order summary");
+    need(positionsTab(), "Positions tab");
+    const ids = new Set(
+      [...document.querySelectorAll('button[aria-label*=" position "]')].map((b) => b.getAttribute("aria-label").match(/ position (\d+)$/)?.[1]).filter(Boolean),
+    );
+    for (const id of ids) need(closeSelector(id), `Close button for position ${id}`);
+    return { ok: problems.length === 0, problems, positions: ids.size };
+  }
+  function runPageCheck() {
+    const check = pageCheck();
+    if (!check || !port) return;
+    const key = JSON.stringify([check.ok, check.problems]);
+    // changes at once; an unchanged result every 5 minutes, in case the worker restarted
+    if (key === lastCheckKey && Date.now() - lastCheckSentMs < 300_000) return;
+    lastCheckKey = key;
+    lastCheckSentMs = Date.now();
+    port.postMessage({ kind: "pageCheck", ok: check.ok, problems: check.problems, positions: check.positions });
+  }
+  setTimeout(runPageCheck, 4000);
+  setInterval(runPageCheck, 30_000);
+  let bannerSeen = false;
+  new MutationObserver(() => {
+    const banner = /new version of Papertrade/i.test(document.body.innerText);
+    if (banner && !bannerSeen) setTimeout(runPageCheck, 1000); // re-check as soon as papertrade ships an update
+    bannerSeen = banner;
+  }).observe(document.body, { childList: true });
 
   // Results show next to the control that caused them (`near`); engine alerts go to the card's foot.
   function flash(level, text, near = null) {
@@ -338,6 +416,14 @@
   let managing = false;
   function syncManaging() {
     managing = !!snap?.managing;
+    // papertrade's page changed under Paper Route: say so above everything else
+    const check = snap?.pageCheck;
+    banner.classList.toggle("bad", !!check && !check.ok);
+    if (check && !check.ok) {
+      banner.hidden = false;
+      banner.textContent = `Papertrade's page changed (${check.problems.join("; ")}). Stop loss / take profit may not be able to close positions: watch them, or close by hand.`;
+      return;
+    }
     banner.hidden = !managing;
     if (!managing) return;
     const held = Object.values(snap.lanes ?? {}).filter((l) => l.auto && l.open).map((l) => l.coin);

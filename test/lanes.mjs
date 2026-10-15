@@ -113,5 +113,17 @@ console.log("\n# per-coin leverage");
 await engine.setLeverage({ leverage: 5, cross: false, coin: "BTC" });
 check(store.hedgeSettings.leverage.BTC.value === 5 && engine.snapshot().settings.hlLeverage === 10, "BTC at 5x; the ETH view keeps the default");
 
+console.log("\n# papertrade page self-check");
+const alertsBefore = engine.snapshot().alerts.length;
+engine.setPageCheck({ ok: false, problems: ["Close button for position 7: 2 matches"] });
+let sn = engine.snapshot();
+check(sn.pageCheck.ok === false && /page changed \(Close button for position 7: 2 matches\)/.test(sn.alerts[0].text), "a failed check alerts with the problem");
+engine.setPageCheck({ ok: false, problems: ["Close button for position 7: 2 matches"] });
+check(engine.snapshot().alerts.filter((a) => /page changed/.test(a.text)).length === 1, "the same failure doesn't alert again");
+engine.setPageCheck({ ok: true, problems: [] });
+sn = engine.snapshot();
+check(sn.pageCheck.ok && /passes again/.test(sn.alerts[0].text), "recovery is announced");
+check(sn.alerts.length >= alertsBefore + 2, "two alerts in total");
+
 console.log(failures ? `\n${failures} FAILED` : "\nALL PASS");
 process.exit(failures ? 1 : 0);

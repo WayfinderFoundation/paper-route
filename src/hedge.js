@@ -89,6 +89,7 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
     busy: null, // label of the action in flight
     alerts: [], // newest first, { level, text, at }
     lastFill: null,
+    pageCheck: null, // { ok, problems, at }: papertrade's page still has exactly one of each element Paper Route uses
   };
 
   const emit = () => publish(snapshot());
@@ -651,6 +652,17 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
   });
   const exitsReady = exits.init();
 
+  // the papertrade tab's self-check; alert on each change, so a papertrade update that moves its buttons
+  // is noticed before a stop loss or take profit needs them
+  function setPageCheck({ ok, problems = [] }) {
+    const was = state.pageCheck;
+    state.pageCheck = { ok: !!ok, problems, at: Date.now() };
+    const changed = !was || was.ok !== !!ok || JSON.stringify(was.problems) !== JSON.stringify(problems);
+    if (changed && !ok) alert("error", `Papertrade's page changed (${problems.join("; ")}). Stop loss / take profit may not be able to close positions: watch them, or close by hand.`);
+    else if (changed && ok && was && !was.ok) alert("ok", "Papertrade's page check passes again");
+    else if (changed) emit();
+  }
+
   async function setExit(args) {
     await exitsReady;
     return exits.set(args);
@@ -661,5 +673,5 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
     return exits.arm({ coin: view().coin, ...args });
   }
 
-  return { setExit, armExit, configure, hedgeNow, setAuto, setLeverage, sendToPapertrade, refreshVault, snapshot, emit, setupAgent, setSessionWallet, setPageCoin, coin: () => view().coin, coins: () => COINS };
+  return { setPageCheck, setExit, armExit, configure, hedgeNow, setAuto, setLeverage, sendToPapertrade, refreshVault, snapshot, emit, setupAgent, setSessionWallet, setPageCoin, coin: () => view().coin, coins: () => COINS };
 }

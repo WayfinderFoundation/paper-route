@@ -3,7 +3,7 @@
 // time-axis labels at exactly the x of their timestamp. We observe those calls each frame
 // and fit price->y and time->x, then hand the mapping to the isolated-world overlay.
 (() => {
-  const TAG = "wf-pt-map";
+  const TAG = "paper-route-chart";
   const origFillText = CanvasRenderingContext2D.prototype.fillText;
 
   const PRICE_RE = /^\$?-?[\d,]+(\.\d+)?$/;

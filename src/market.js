@@ -10,6 +10,9 @@ const PING_MS = 30_000;
 
 const ports = new Map(); // port -> coin
 const coins = new Map(); // coin -> { engine, book, trades, assetCtx, timer }
+// tabs that aren't visible get no frames (a frozen tab could otherwise queue them up); they get the
+// next one within 100 ms of being shown again
+const hiddenPorts = new Set();
 let ws = null;
 let wsState = "idle";
 let retryMs = 500;
@@ -129,7 +132,7 @@ function tick(coin) {
       });
     }
   }
-  for (const [port, pc] of ports) if (pc === coin) port.postMessage(frame);
+  for (const [port, pc] of ports) if (pc === coin && !hiddenPorts.has(port)) port.postMessage(frame);
 }
 
 function watch(coin) {
@@ -166,7 +169,12 @@ function sweep() {
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "wf-pr-market") return;
-  port.onMessage.addListener(({ coin }) => {
+  port.onMessage.addListener(({ coin, hidden }) => {
+    if (hidden !== undefined) {
+      if (hidden) hiddenPorts.add(port);
+      else hiddenPorts.delete(port);
+      return;
+    }
     const c = String(coin ?? "").toUpperCase();
     if (!(c in WEIGHTS)) return;
     ports.set(port, c);
@@ -175,6 +183,7 @@ chrome.runtime.onConnect.addListener((port) => {
   });
   port.onDisconnect.addListener(() => {
     ports.delete(port);
+    hiddenPorts.delete(port);
     unwatchUnused();
   });
 });
