@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Paper Route",
   "short_name": "Paper Route",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Delta-neutral papertrade ↔ Hyperliquid hedging that follows papertrade's queue, with a Hyperliquid order-flow overlay. By Wayfinder.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArKHUgPIOxsaWIdDmhLBWz7772QwtvIxNP6IssGnaEfLblSyAbzPOIcVpoeA1nqu8D9rAZpMCr4kg21UCX60obR986LR1EK7zwxoY/MRGVQ1U1+dooqLU0/NPUTsuMpleXwTpAqpbaLMuWS77Z5krYQbvMvOc+qeEfCggnMvVZTmNXqCqAqj1u+lUAbX79hed1GlIssVAXGms27R8k9bheArVRFfPb7Giu/AMy8k4sEWaZI/JayBdrhBXLa99Oxz7ksAxu0eW0Rp+iOHFumKd9ymYV2LjFqQerA6B4iJyr4mq+8/6WORT1z6iaXbqYXObemb4JJpRX6NV24g3zB02VwIDAQAB",
   "icons": {

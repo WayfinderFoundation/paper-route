@@ -11,8 +11,8 @@ document.getElementById("reset").addEventListener("click", async () => {
 });
 
 // ---------- hedge ----------
-const HEDGE_FIELDS = ["bandUsd", "slippageBps", "maxOrderUsd", "maxPositionUsd", "roundMarginUsd", "marginK", "builderFee", "safetyNet"];
-const HEDGE_DEFAULTS = { slippageBps: 30, bandUsd: 50, maxOrderUsd: 25000, maxPositionUsd: 50000, builderFee: true, marginK: 3, roundMarginUsd: 100, safetyNet: true };
+const HEDGE_FIELDS = ["bandUsd", "slippageBps", "orderChunkUsd", "maxHedgeUsd", "roundMarginUsd", "marginK", "builderFee", "safetyNet"];
+const HEDGE_DEFAULTS = { slippageBps: 30, bandUsd: 50, orderChunkUsd: 50000, maxHedgeUsd: 0, builderFee: true, marginK: 3, roundMarginUsd: 100, safetyNet: true };
 const $id = (id) => document.getElementById(id);
 const keyResult = $id("keyResult");
 
