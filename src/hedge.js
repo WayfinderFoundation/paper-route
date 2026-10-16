@@ -6,10 +6,12 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { buildSigner, localKeySigner } from "./signers.js";
 import { getAgent, getSecret, storeAgent, vaultStatus } from "./vault.js";
 import { createHl, roundPrice, roundSize } from "./hl.js";
-import { depositProxy, positionsOf, sideRoomUsd, subscribeAccount, summarize, tradingLimitsAll, winFeeRate } from "./papertrade.js";
+import { closedTrades, depositProxy, positionsOf, sideRoomUsd, subscribeAccount, summarize, tradingLimitsAll, winFeeRate } from "./papertrade.js";
 import { planSafetyNet } from "./safetynet.js";
 import { withRetry } from "./retry.js";
 import { createExits } from "./exits.js";
+import { createPairs } from "./pairs.js";
+import { dnCost } from "./dncost.js";
 
 export const INSTRUMENT_IDS = { BTC: 0, ETH: 1 };
 const COINS = Object.keys(INSTRUMENT_IDS);
@@ -22,14 +24,18 @@ export const HEDGE_DEFAULTS = {
   network: "mainnet",
   slippageBps: 30,
   bandUsd: 50,
-  maxOrderUsd: 25_000,
-  maxPositionUsd: 50_000,
+  // big hedges go out as orders of at most this notional, one after another (0: one order); not a cap
+  orderChunkUsd: 50_000,
+  maxHedgeUsd: 0, // optional cap on the total hedge per coin (0: none; Hyperliquid's own margin check still applies)
   builderFee: true,
   marginK: 3,
   roundMarginUsd: 100,
   hlLeverage: 10, // per-coin choices live in `leverage`; this is the default for a coin not set yet
   hlCross: true,
   leverage: {}, // coin → { value, cross }
+  // delta neutral per coin: hedged on Hyperliquid (Tether) or with an opposite papertrade position, covering
+  // a share of the papertrade position; auto close closes both legs together
+  dn: {}, // coin → { on, venue: "hl" | "pt", coverage: 0.25–1, autoClose }
   safetyNet: true,
 };
 
@@ -44,6 +50,7 @@ const DEPOSIT_CONFIRM_TIMEOUT_MS = 90_000;
 const HL_COST_FRACTION = 0.001;
 // errors worth retrying rather than stopping Tether over
 const TRANSIENT = /fetch failed|failed to fetch|network|timed? ?out|timeout|ECONN|ENOTFOUND|socket|\b(429|5\d\d)\b|busy|temporarily/i;
+const JOB_TIMEOUT_MS = 60_000; // longest any one queued Hyperliquid action may take
 const NET_RETRY_MS = 5_000; // safety-net reconcile: soonest after the last attempt
 const NET_REFRESH_MS = 60_000; // …and at least this often even when nothing changed
 
@@ -63,11 +70,12 @@ const newLane = (coin) => ({
   netKey: "",
 });
 
-const IO = { createHl, subscribeAccount, summarize, positionsOf, tradingLimitsAll, winFeeRate, depositProxy, getAgent, getSecret, storeAgent, vaultStatus };
+const IO = { closedTrades, createHl, subscribeAccount, summarize, positionsOf, tradingLimitsAll, winFeeRate, depositProxy, getAgent, getSecret, storeAgent, vaultStatus };
 
 // `io` swaps the network and key-vault calls (tests)
 export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
   const io = { ...IO, ...ioOverrides };
+  const jobTimeoutMs = ioOverrides.jobTimeoutMs ?? JOB_TIMEOUT_MS;
   let settings = { ...HEDGE_DEFAULTS };
   let hl = null;
   let meta = null; // coin → { szDecimals, maxLeverage, … }
@@ -99,6 +107,10 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
     emit();
   }
 
+  const DN_DEFAULT = { on: false, venue: "hl", coverage: 1, autoClose: true };
+  const dnOf = (coin) => ({ ...DN_DEFAULT, ...settings.dn?.[coin] });
+  // the Hyperliquid hedge covers this share of papertrade (1 unless delta neutral is set to less)
+  const coverageOf = (coin) => (dnOf(coin).venue === "hl" ? dnOf(coin).coverage : 1);
   const leverageOf = (coin) => settings.leverage?.[coin] ?? { value: settings.hlLeverage, cross: settings.hlCross };
   const szDecimals = (coin) => meta[coin].szDecimals;
   const ptAvailable = () => (lastPtFrame ? Number(BigInt(lastPtFrame.funds.availableBalance)) / 1e18 : 0);
@@ -135,7 +147,7 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
     const pt = lane.summary;
     const acct = lane.account;
     if (!pt || !acct) return null;
-    const target = -pt.netSize;
+    const target = -pt.netSize * coverageOf(lane.coin);
     const delta = target - acct.size;
     return { target, delta, deltaUsd: delta * acct.mid, mid: acct.mid };
   }
@@ -171,7 +183,10 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
       // this coin's papertrade positions, decoded, for the TP/SL editors
       ptPositions: lastPtFrame && v.account ? safePositions(v.coin, v.account.mid) : [],
       pageCoin: viewCoin,
-      managing: allLanes().some((l) => l.auto && isOpen(l)) || exits.managing(),
+      managing: allLanes().some((l) => l.auto && isOpen(l)) || exits.managing() || pairs.managing(),
+      // on the Hyperliquid venue, delta neutral is Tether itself (set before delta neutral existed, or from the HUD)
+      dn: { ...dnOf(v.coin), on: dnOf(v.coin).venue === "hl" ? v.auto : dnOf(v.coin).on },
+      pairs: pairs.snapshot(),
     };
   }
 
@@ -283,6 +298,8 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
       state.hl.error = String(err.message || err);
     }
     for (const l of allLanes()) maybeAutoHedge(l);
+    for (const l of allLanes()) trackEpisode(l);
+    settleEpisodes();
     emit();
     for (const l of allLanes()) syncSafetyNet(l);
   }
@@ -344,12 +361,73 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
     }
   }
 
+  // ---------- a finished delta-neutral trade's cost per Paper ----------
+  // Hyperliquid venue: a trade runs from the first papertrade fill on a coin until papertrade is flat again
+  // and the hedge has unwound; then papertrade's paid P&L and Paper, and Hyperliquid's P&L, fees and funding
+  // over that window, are summed. Papertrade venue: when both legs of a pair have closed. Only complete
+  // exits get a summary: a hedge that hasn't unwound within EPISODE_SETTLE_MS doesn't.
+  const EPISODE_SETTLE_MS = 90_000;
+  function trackEpisode(lane) {
+    if (!lane.account || !lastPtFrame) return;
+    const ids = safePositions(lane.coin, lane.account.mid);
+    if (!lane.auto) {
+      lane.episode = null; // not hedged on Hyperliquid: not a delta-neutral trade there
+      return;
+    }
+    if (ids.length) {
+      lane.episode ??= { start: Math.min(...ids.map((p) => p.openedAtMs)), ids: new Set() };
+      lane.episode.closedAt = null;
+      for (const p of ids) lane.episode.ids.add(p.id);
+    } else if (lane.episode && !lane.episode.closedAt) {
+      lane.episode.closedAt = Date.now();
+    }
+  }
+  function settleEpisodes() {
+    for (const lane of allLanes()) {
+      const ep = lane.episode;
+      if (!ep?.closedAt || !lane.account) continue;
+      if (roundSize(Math.abs(lane.account.size), szDecimals(lane.coin)) === 0) {
+        lane.episode = null;
+        summarizeTrade({ coin: lane.coin, ids: [...ep.ids], start: ep.start, venue: "hl" });
+      } else if (Date.now() - ep.closedAt > EPISODE_SETTLE_MS) {
+        lane.episode = null; // the hedge never unwound: not a clean exit, no summary
+      }
+    }
+  }
+  async function summarizeTrade({ coin, ids, start, venue }) {
+    try {
+      let pt = {};
+      for (let i = 0; i < 8 && Object.keys(pt).length < ids.length; i++) {
+        if (i) await new Promise((r) => setTimeout(r, 5_000)); // a close takes a few seconds to show in the history
+        pt = await io.closedTrades(settings.ptWallet, ids);
+      }
+      if (Object.keys(pt).length < ids.length) return; // couldn't confirm every leg closed: no summary
+      let hlPart = null;
+      if (venue === "hl") {
+        const from = (start ?? Date.now() - 3_600_000) - 10_000;
+        const to = Date.now() + 5_000;
+        hlPart = { fills: await hl.fills(settings.hedgeWallet, from, to), funding: await hl.funding(settings.hedgeWallet, from, to) };
+      }
+      const c = dnCost({ coin, pt, hl: hlPart });
+      state.dnSummary = { ...c, at: Date.now() };
+      const money = (v) => `${v < 0 ? "−" : "+"}$${Math.abs(v).toFixed(2)}`;
+      alert(
+        "ok",
+        `${coin} delta-neutral trade closed: ${Math.round(c.paper).toLocaleString()} Paper, net ${money(c.net)}` +
+          (c.costPerPaper != null ? ` (${c.costPerPaper >= 0 ? "$" + c.costPerPaper.toFixed(4) + " per Paper" : "paid $" + (-c.costPerPaper).toFixed(4) + " per Paper"})` : ""),
+      );
+    } catch (err) {
+      alert("warn", `Couldn't work out the cost of the ${coin} delta-neutral trade: ${err.message || err}`);
+    }
+  }
+
   function onPtFrame(frame) {
     lastPtFrame = frame;
     for (const l of allLanes()) {
       if (!l.account) continue;
       remarkPt(l);
       maybeAutoHedge(l);
+      trackEpisode(l);
     }
     emit();
   }
@@ -398,15 +476,24 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
   }
 
   // One Hyperliquid action at a time, across all lanes: queued, not refused, so BTC and ETH hedges
-  // that come due together both go out, one after the other.
+  // that come due together both go out, one after the other. No action may hold the queue forever:
+  // one that hasn't settled after JOB_TIMEOUT_MS fails as timed out (auto-hedge retries it; network
+  // calls inside have their own 8 s timeouts and orders are idempotent, so this only frees a stuck wait).
   let queue = Promise.resolve();
   function run(label, fn) {
     const job = queue.then(async () => {
       state.busy = label;
       emit();
+      let timer;
       try {
-        return await fn();
+        return await Promise.race([
+          fn(),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(jobTimeoutMs / 1000)} s`)), jobTimeoutMs);
+          }),
+        ]);
       } finally {
+        clearTimeout(timer);
         state.busy = null;
         emit();
       }
@@ -415,41 +502,73 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
     return job;
   }
 
+  // Papertrade's own notional for a coin (Σ margin × leverage of its open positions), worked out apart from
+  // the decoded net size the hedge target comes from: if the two disagree, something was misread.
+  function ptNotionalUsd(coin, mid) {
+    return safePositions(coin, mid).reduce((sum, p) => sum + p.margin * p.leverage, 0);
+  }
+  const SANITY_SLACK = 1.15; // price drift since entry, and rounding
+  const MAX_CHUNKS = 20;
+
   async function hedgeLane(lane, source = "manual") {
-    return run(source === "auto" ? `Hedging ${lane.coin}` : `Hedging ${lane.coin}`, async () => {
+    return run(`Hedging ${lane.coin}`, async () => {
       await readHl([lane.coin]);
-      const d = deltaInfo(lane);
+      let d = deltaInfo(lane);
       if (!d) throw new Error(`Need both papertrade and Hyperliquid state to hedge ${lane.coin}`);
-      const size = roundSize(Math.abs(d.delta), szDecimals(lane.coin));
-      if (size === 0) return null;
-      const orderUsd = size * d.mid;
-      if (orderUsd > settings.maxOrderUsd) throw new Error(`Hedge order $${orderUsd.toFixed(0)} exceeds max order $${settings.maxOrderUsd}`);
-      if (Math.abs(d.target) * d.mid > settings.maxPositionUsd) throw new Error(`Target hedge $${(Math.abs(d.target) * d.mid).toFixed(0)} exceeds max position $${settings.maxPositionUsd}`);
-      const current = lane.account.size;
-      const isBuy = d.delta > 0;
-      // reduce-only when the order only shrinks the existing HL position (no flip)
-      const reduceOnly = current !== 0 && Math.sign(d.delta) !== Math.sign(current) && Math.abs(d.delta) <= Math.abs(current) + 1e-12;
-      lane.lastOrderAt = Date.now();
+      const dec = szDecimals(lane.coin);
+      if (roundSize(Math.abs(d.delta), dec) === 0) return null;
+      const targetUsd = Math.abs(d.target) * d.mid;
+      const ptUsd = ptNotionalUsd(lane.coin, d.mid);
+      if (targetUsd > ptUsd * coverageOf(lane.coin) * SANITY_SLACK + 100) {
+        throw new Error(`${lane.coin} hedge target $${Math.round(targetUsd).toLocaleString()} doesn't match papertrade's $${Math.round(ptUsd).toLocaleString()} of open ${lane.coin} positions, so nothing was sent. Reload papertrade; if it persists, reload Paper Route.`);
+      }
+      if (settings.maxHedgeUsd > 0 && targetUsd > settings.maxHedgeUsd) {
+        throw new Error(`${lane.coin} hedge of $${Math.round(targetUsd).toLocaleString()} is over the max hedge of $${settings.maxHedgeUsd.toLocaleString()} you set in Paper Route's settings`);
+      }
       const s = await signer();
       await ensureLeverage(lane, s);
       await ensureBuilderFeeApproved();
       const lev = leverageOf(lane.coin);
-      if (!reduceOnly) {
-        // only the part that adds exposure needs margin; HL's availableToTrade is per side
-        await readHl([lane.coin]);
-        const flipping = current !== 0 && Math.sign(d.delta) !== Math.sign(current);
-        const addingUsd = (flipping ? size - Math.abs(current) : size) * d.mid;
+      // only the part that adds exposure needs margin; HL's availableToTrade is per side. Checked for the
+      // whole hedge up front, so it never stops half way for lack of margin.
+      await readHl([lane.coin]);
+      d = deltaInfo(lane);
+      const current = lane.account.size;
+      const isBuy = d.delta > 0;
+      const flipping = current !== 0 && Math.sign(d.delta) !== Math.sign(current);
+      const shrinkingOnly = flipping && Math.abs(d.delta) <= Math.abs(current) + 1e-12;
+      if (!shrinkingOnly) {
+        const addingUsd = (flipping ? Math.abs(d.delta) - Math.abs(current) : Math.abs(d.delta)) * d.mid;
         const free = lane.account.availableToTrade[isBuy ? 0 : 1];
         const maxUsd = free / (1 / lev.value + HL_COST_FRACTION);
         if (addingUsd > maxUsd + 1) {
           throw new Error(`Hyperliquid can only carry $${Math.floor(maxUsd).toLocaleString()} more ${lane.coin} ${isBuy ? "long" : "short"} at ${lev.value}x ($${free.toFixed(2)} free); this hedge needs $${Math.ceil(addingUsd).toLocaleString()}`);
         }
       }
-      const fill = await hl.marketOrder(s, { coin: lane.coin, isBuy, size, reduceOnly, slippageBps: settings.slippageBps, builderFee: settings.builderFee });
-      state.lastFill = { ...fill, coin: lane.coin, at: Date.now(), source };
+      // in chunks of at most orderChunkUsd, re-reading the account between them
+      let last = null;
+      for (let i = 0; i < MAX_CHUNKS; i++) {
+        if (i > 0) {
+          await readHl([lane.coin]);
+          d = deltaInfo(lane);
+          if (Math.abs(d.deltaUsd) <= settings.bandUsd) break;
+        }
+        const remaining = roundSize(Math.abs(d.delta), dec);
+        if (remaining === 0) break;
+        const chunkCap = settings.orderChunkUsd > 0 ? roundSize(settings.orderChunkUsd / d.mid, dec) : remaining;
+        const size = Math.min(remaining, Math.max(chunkCap, 10 ** -dec));
+        const pos = lane.account.size;
+        const buy = d.delta > 0;
+        // reduce-only when this order only shrinks the existing HL position (no flip)
+        const reduceOnly = pos !== 0 && Math.sign(d.delta) !== Math.sign(pos) && size <= Math.abs(pos) + 1e-12;
+        lane.lastOrderAt = Date.now();
+        last = await hl.marketOrder(s, { coin: lane.coin, isBuy: buy, size, reduceOnly, slippageBps: settings.slippageBps, builderFee: settings.builderFee });
+        state.lastFill = { ...last, coin: lane.coin, at: Date.now(), source };
+        if (size >= remaining) break;
+      }
       lane.pendingDelta = null;
       await readHl([lane.coin]);
-      return fill;
+      return last;
     });
   }
 
@@ -608,8 +727,59 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
       if (!live()) throw new Error("Both papertrade and Hyperliquid must be live");
     }
     await setLaneOn(lane, on);
+    const dn = dnOf(coin);
+    if (on) await saveDn(coin, { ...dn, on: true, venue: "hl" });
+    else if (dn.venue === "hl" && dn.on) await saveDn(coin, { ...dn, on: false });
     emit();
     if (on) maybeAutoHedge(lane);
+  }
+
+  async function saveDn(coin, next) {
+    settings = { ...settings, dn: { ...settings.dn, [coin]: next } };
+    await chrome.storage.local.set({ hedgeSettings: settings, hedgeSettingsQuiet: Date.now() });
+  }
+
+  // the order ticket's delta-neutral controls
+  async function setDeltaNeutral({ coin = view().coin, on, venue, coverage, autoClose }) {
+    const lane = lanes[coin];
+    if (!lane) throw new Error(`Unknown coin ${coin}`);
+    const next = { ...dnOf(coin) };
+    if (on !== undefined) next.on = !!on;
+    if (venue !== undefined) {
+      if (venue !== "hl" && venue !== "pt") throw new Error(`Unknown venue ${venue}`);
+      next.venue = venue;
+    }
+    if (coverage !== undefined) {
+      if (!(coverage > 0 && coverage <= 1)) throw new Error("Coverage must be between 0 and 100%");
+      next.coverage = coverage;
+    }
+    if (autoClose !== undefined) next.autoClose = !!autoClose;
+    if (next.on && next.venue === "hl") {
+      if (!(await canTrade())) throw new Error("Connect your Hyperliquid wallet to hedge there (toolbar icon → Connect)");
+      if (!live()) throw new Error("Both papertrade and Hyperliquid must be live");
+      await setLaneOn(lane, true);
+    } else if (lane.auto) {
+      await setLaneOn(lane, false); // hedging with papertrade itself, or off: Hyperliquid isn't touched
+    }
+    await saveDn(coin, next);
+    emit();
+    if (lane.auto) maybeAutoHedge(lane);
+    return next;
+  }
+
+  // the ticket is placing a main order and its opposite papertrade hedge: pair them when they fill
+  async function armPair({ coin, mainIsLong }) {
+    await pairsReady;
+    pairs.arm({ coin, mainIsLong });
+  }
+
+  // "Close both": a papertrade pair closes both legs; with the Hyperliquid venue, closing papertrade is
+  // enough (Tether closes the hedge when that close fills)
+  async function closeBoth({ positionId, coin }) {
+    await pairsReady;
+    if (await pairs.closePair(positionId)) return { pair: true };
+    await exec("ptClose", { positionId: String(positionId), coin });
+    return { pair: false };
   }
 
   async function hedgeNow({ coin = view().coin } = {}) {
@@ -651,8 +821,30 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
     exec,
     alert: (level, text) => alert(level, text),
     emit: () => emit(),
+    // a stop loss / take profit fired: both legs close with auto close; without it the hedge is left to run
+    onExitHit: (positionId, coin, reason) => {
+      pairs.onExitHit(positionId, reason);
+      const dn = dnOf(coin);
+      if (!dn.autoClose && dn.venue === "hl" && lanes[coin]?.auto) {
+        setLaneOn(lanes[coin], false);
+        alert("warn", `${coin} ${reason}: closing the papertrade position only. Tether is now off for ${coin}, so the Hyperliquid hedge stays open (auto close is off)`);
+      }
+    },
   });
   const exitsReady = exits.init();
+  const pairs = createPairs({
+    positions: () => (lastPtFrame ? COINS.flatMap((coin) => (lanes[coin].account ? safePositions(coin, lanes[coin].account.mid) : [])) : []),
+    readableCoins: () => (lastPtFrame ? COINS.filter((coin) => lanes[coin].account) : []),
+    openQueued: (coin, isLong) => (lastPtFrame?.operations ?? []).some((op) => op[1] === "openPosition" && Number(op[2]) === INSTRUMENT_IDS[coin] && !!op[3] === isLong),
+    closeQueued: (id) => (lastPtFrame?.operations ?? []).some((op) => op[1] === "closePositions" && (op[9] ?? []).map(String).includes(id)),
+    ptLive: () => state.pt.status === "live" && !!lastPtFrame,
+    autoClose: (coin) => dnOf(coin).autoClose,
+    onDone: ({ coin, ids, openedAt }) => summarizeTrade({ coin, ids, start: openedAt, venue: "pt" }),
+    exec,
+    alert: (level, text) => alert(level, text),
+    emit: () => emit(),
+  });
+  const pairsReady = pairs.init();
 
   // the papertrade tab's self-check; alert on each change, so a papertrade update that moves its buttons
   // is noticed before a stop loss or take profit needs them
@@ -675,5 +867,5 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
     return exits.arm({ coin: view().coin, ...args });
   }
 
-  return { setPageCheck, setExit, armExit, configure, hedgeNow, setAuto, setLeverage, sendToPapertrade, refreshVault, snapshot, emit, setupAgent, setSessionWallet, setPageCoin, coin: () => view().coin, coins: () => COINS };
+  return { setDeltaNeutral, armPair, closeBoth, setPageCheck, setExit, armExit, configure, hedgeNow, setAuto, setLeverage, sendToPapertrade, refreshVault, snapshot, emit, setupAgent, setSessionWallet, setPageCoin, coin: () => view().coin, coins: () => COINS };
 }

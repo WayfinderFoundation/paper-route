@@ -265,3 +265,28 @@ export async function depositProxy(user) {
   if (!res.ok) throw new Error(`papertrade deposit check HTTP ${res.status}`);
   return (await res.json()).proxy;
 }
+
+// closed trades for these positions, from the account's trade history (newest first; it can take a few
+// seconds for a close to appear): { positionId → { paidUsd, paper, liquidated, closedAtMs } }
+export async function closedTrades(user, positionIds) {
+  const want = new Set(positionIds.map(String));
+  const found = {};
+  let cursor = null;
+  for (let page = 0; page < 5 && Object.keys(found).length < want.size; page++) {
+    const res = await fetch(`${PT_BASE}/query/accounts/${user.toLowerCase()}/trades${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`);
+    if (!res.ok) throw new Error(`papertrade trade history HTTP ${res.status}`);
+    const body = await res.json();
+    for (const t of body.items ?? []) {
+      if (!want.has(String(t.positionId)) || (t.kind !== "PositionClosed" && t.kind !== "Liquidated")) continue;
+      found[t.positionId] = {
+        paidUsd: Number(BigInt(t.adjustedPnlRaw ?? "0")) / 1e18,
+        paper: Number(BigInt(t.paperMintedRaw ?? "0")) / 1e18,
+        liquidated: t.kind === "Liquidated",
+        closedAtMs: t.timestampMs,
+      };
+    }
+    if (!body.nextCursor) break;
+    cursor = body.nextCursor;
+  }
+  return found;
+}

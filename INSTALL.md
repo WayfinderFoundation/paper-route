@@ -11,7 +11,7 @@
 
 ## Keep it running
 
-Stop losses, take profits and Tether (BTC and ETH at once) run in your browser, not on papertrade or Hyperliquid. While the
+Stop losses, take profits, delta-neutral pairs and Tether (BTC and ETH at once) run in your browser, not on papertrade or Hyperliquid. While the
 toolbar icon shows **ON**, keep Chrome open and Paper Route enabled. The papertrade tab may be closed: Paper Route
 reopens it in the background when it needs to close something.
 

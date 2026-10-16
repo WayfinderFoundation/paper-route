@@ -353,6 +353,14 @@ export function createHl() {
     }
   }
 
+  // fills and funding over a window, for a closed trade's costs
+  async function fills(user, startTime, endTime) {
+    return read("userFillsByTime", () => info.userFillsByTime({ user, startTime, endTime, aggregateByTime: false }));
+  }
+  async function funding(user, startTime, endTime) {
+    return read("userFunding", () => info.userFunding({ user, startTime, endTime }));
+  }
+
   async function setLeverage(signer, coin, leverage, isCross) {
     const meta = (await loadMeta())[coin];
     if (leverage > meta.maxLeverage) throw new Error(`${coin} max leverage on Hyperliquid is ${meta.maxLeverage}x`);
@@ -399,7 +407,7 @@ export function createHl() {
     };
   }
 
-  return { loadMeta, mid, account, accounts, openOrders, marketOrder, placeTrigger, placeBrackets, cancel, setLeverage, perpToSpot, sendUsdc, abstraction, priceRange, subscribeMid, builderFeeApproved, approveBuilderFee, approveAgent };
+  return { loadMeta, mid, account, accounts, fills, funding, openOrders, marketOrder, placeTrigger, placeBrackets, cancel, setLeverage, perpToSpot, sendUsdc, abstraction, priceRange, subscribeMid, builderFeeApproved, approveBuilderFee, approveAgent };
 }
 
 export function roundSize(size, szDecimals) {

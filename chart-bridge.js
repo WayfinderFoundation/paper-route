@@ -60,7 +60,10 @@
       scaleY: canvas.height / cssSize.height,
       prices: new Map(), // style key -> [{price, x, y}]
       times: [],
-      dot: null, // the live-price dot: last glowing arc drawn this frame
+      // glowing arcs this frame: the live-price dot, but also papertrade's trade / liquidation badges ("L"),
+      // which are glowing circles with a letter on them; the dot is the rightmost one without a letter
+      arcs: [],
+      letters: [],
     };
     queueMicrotask(flush);
   }
@@ -95,6 +98,9 @@
     let xFit = null;
     if (b.times.length >= 2) xFit = fitLine(b.times, "t", "x");
 
+    const badge = (a) => b.letters.some((l) => Math.hypot(l[0] - a[0], l[1] - a[1]) <= a[2] + 6);
+    const dot = b.arcs.filter((a) => !badge(a)).reduce((best, a) => (!best || a[0] >= best[0] ? a : best), null);
+
     const msg = {
       type: TAG,
       price0: yFit.x0,
@@ -105,8 +111,8 @@
       time0: xFit ? xFit.x0 : null,
       timeSlope: xFit ? xFit.slope : null,
       timeIntercept: xFit ? xFit.intercept : null,
-      dotX: b.dot ? b.dot[0] : null,
-      dotY: b.dot ? b.dot[1] : null,
+      dotX: dot ? dot[0] : null,
+      dotY: dot ? dot[1] : null,
     };
     const key = JSON.stringify(msg);
     if (key === lastSent) return;
@@ -118,7 +124,8 @@
   CanvasRenderingContext2D.prototype.arc = function (x, y, r, a0, a1, ccw) {
     if (this.shadowBlur > 0 && r <= 8 && isChartCanvas(this.canvas)) {
       if (!batch || batch.canvas !== this.canvas) startBatch(this.canvas);
-      batch.dot = toCss(this, x, y);
+      const [cx, cy] = toCss(this, x, y);
+      batch.arcs.push([cx, cy, r / batch.scaleX]);
     }
     return origArc.call(this, x, y, r, a0, a1, ccw);
   };
@@ -127,6 +134,7 @@
     if (typeof text === "string" && isChartCanvas(this.canvas)) {
       if (!batch || batch.canvas !== this.canvas) startBatch(this.canvas);
       const s = text.trim();
+      if (s.length > 0 && s.length <= 2 && /^[A-Za-z]+$/.test(s)) batch.letters.push(toCss(this, x, y));
       if (this.textAlign === "left" && this.textBaseline === "middle" && PRICE_RE.test(s)) {
         const [cx, cy] = toCss(this, x, y);
         const key = `${this.font}|${this.fillStyle}`;

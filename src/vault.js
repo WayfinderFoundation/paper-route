@@ -21,12 +21,26 @@ const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 // ---------- device key (non-extractable, IndexedDB) ----------
+// Every request settles: an IndexedDB open that is blocked or never answers would otherwise leave
+// whatever awaits the key (a hedge order) waiting forever.
+const IDB_TIMEOUT_MS = 5000;
 function idb() {
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Key storage (IndexedDB) didn't open in time")), IDB_TIMEOUT_MS);
     const req = indexedDB.open("wf-vault", 1);
     req.onupgradeneeded = () => req.result.createObjectStore("keys");
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      clearTimeout(timer);
+      resolve(req.result);
+    };
+    req.onerror = () => {
+      clearTimeout(timer);
+      reject(req.error);
+    };
+    req.onblocked = () => {
+      clearTimeout(timer);
+      reject(new Error("Key storage (IndexedDB) is blocked by another open connection"));
+    };
   });
 }
 
@@ -38,6 +52,7 @@ function idbOp(mode, fn) {
         const req = fn(tx.objectStore("keys"));
         tx.oncomplete = () => resolve(req.result);
         tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error ?? new Error("Key storage transaction aborted"));
       }),
   );
 }

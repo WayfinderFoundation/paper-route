@@ -47,7 +47,7 @@ export function checkLevels({ isLong, entry, tpPx, slPx }) {
 //        decode; papertrade's raw prices are read against each coin's mid),
 //        readableCoins(mids): coins whose positions(mids) is complete,
 //        closeQueued(id), openQueued(coin, isLong), ptLive(), subscribeMid(coin, fn) → stop, mid(coin) → price (one-off read),
-//        exec, alert, emit }
+//        exec, alert, emit, onExitHit?(positionId, coin, reason) }
 export function createExits(ctx) {
   let exits = {}; // positionId → { coin, isLong, entry, tpPx, slPx, state, reason, closeSentAt, attempts, stateAt }
   let pending = null; // { coin, isLong, tp, sl, at, knownIds }
@@ -127,6 +127,7 @@ export function createExits(ctx) {
       const hit = levelHit(x, m.px, m.px);
       if (!hit) continue;
       Object.assign(x, { state: "closing", reason: hit, stateAt: Date.now(), hitPx: m.px });
+      ctx.onExitHit?.(id, x.coin, hit);
       ctx.alert("warn", `${hit === "stop loss" ? "Stop loss" : "Take profit"} hit on ${x.coin} position ${id} at ${m.px.toLocaleString("en-US")}: closing it`);
       save();
       ctx.emit();

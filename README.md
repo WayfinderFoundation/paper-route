@@ -9,6 +9,8 @@
 - **Tether**: holds the opposite position on Hyperliquid for exactly as long as your papertrade position exists.
   It shines with large positions riding big moves (see [Where Tether shines](#where-tether-shines)). It follows
   papertrade's *fills*, not your clicks, so queued orders never leave you one-sided.
+- **Delta neutral from the order ticket**: hedge on Hyperliquid or with an opposite papertrade position, cover
+  25–100 % of it, close both legs together, and see what the trade cost per Paper earned when it closes.
 - **Safety net**: if papertrade liquidates a hedged position while your browser is closed, Hyperliquid closes the
   hedge at the same price.
 - **Order-flow overlay**: a live read of Hyperliquid's order book and trades, drawn on papertrade's chart.
@@ -83,6 +85,8 @@ Tether, stop losses and take profits run **in your browser**. While any of them 
   while Paper Route is responsible for positions.
 - **Tether works without the papertrade tab** as long as Chrome is open: it watches papertrade's account and your
   Hyperliquid account from the extension's background.
+- **Papertrade-venue delta neutral needs a papertrade tab**: the hedge leg is placed through papertrade's order
+  ticket, and closing a pair clicks papertrade's Close buttons.
 - **If Chrome is closed, the laptop sleeps or the extension is off, nothing is watched.** Both legs stay open, so
   you remain hedged, but nothing rebalances. If papertrade liquidates the position meanwhile, the
   [safety net](#safety-net) closes the hedge on Hyperliquid at the same price.
@@ -125,6 +129,29 @@ lose with. Paper Route holds the opposite position on Hyperliquid, so the pair i
 - a queued papertrade close keeps you exposed, so the Hyperliquid leg stays on until the close fills;
 - if the hedge drifts by more than your band (e.g. you trade papertrade by hand), it trues it up.
 
+### Delta neutral (order ticket)
+
+Papertrade's order ticket gets a **Delta neutral** block above TP / SL:
+
+- **Hedge on: Hyperliquid** is Tether: Hyperliquid opens the opposite side when papertrade fills and closes it
+  when papertrade closes.
+- **Hedge on: Papertrade** places an opposite papertrade order together with yours (same leverage). Both wait in
+  papertrade's queue, so they can fill at different times and prices; Paper Route pairs them once both fill.
+- **Coverage** (25 / 50 / 75 / 100 %) sets how much of the position the hedge covers.
+- **Close both** appears while a hedged position is open.
+- **Auto close both legs** (in TP / SL, on by default): a stop loss or take profit closes both legs, and if one leg
+  of a papertrade pair closes or is liquidated the other is closed too. Off: only the papertrade position closes
+  and the hedge is left to run (with Hyperliquid, Tether is switched off for that coin so it isn't unwound).
+
+Papertrade closes whole positions only, so there are no partial trims.
+
+**Cost per Paper.** When a delta-neutral trade finishes, a toast shows what it cost per Paper earned: papertrade's
+paid P&L for every leg (after its cut of winning closes) and the Paper it minted, plus for a Hyperliquid hedge
+that hedge's P&L, fees (including the builder fee) and funding over the trade. It only appears for a complete
+exit: both legs of a papertrade pair closed, or papertrade flat on that coin with the Hyperliquid hedge unwound.
+The numbers come from papertrade's trade history and Hyperliquid's own fill and funding records; any other trading
+on the same coin in the hedge wallet during the trade is counted too.
+
 ### Stop loss and take profit
 
 Papertrade has no stop or take-profit orders, so Paper Route adds them where you'd expect:
@@ -164,9 +191,11 @@ placed are ever changed. It's on by default (Settings → Safety net).
 
 ### Sizing and balances
 
-The max size shown is the most both venues can carry right now: papertrade balance × leverage, papertrade's
-open-interest room and position cap on that side, your own max order / max position settings, and Hyperliquid's
-free margin at your chosen leverage.
+Before you place a papertrade order, the panel warns if Hyperliquid couldn't hedge it: not enough free margin at
+your chosen Hyperliquid leverage, or over the optional max hedge you can set in settings (no cap by default). Big
+hedges go out as several orders of at most the order chunk (default $50K) one after another, so no single order
+moves the price much. Before each hedge Paper Route also checks the target against papertrade's own margin ×
+leverage for that coin and sends nothing if they disagree.
 
 The panel shows live P&L for both legs (papertrade after its win fee), papertrade bust vs Hyperliquid liquidation
 distance, and a rebalance suggestion that keeps Hyperliquid's liquidation a set multiple further away than
@@ -177,7 +206,8 @@ papertrade's bust. One click sends USDC from Hyperliquid to your papertrade depo
 A panel and chart layer built only from Hyperliquid's public websocket (order book, trades, open interest,
 funding): the components (book imbalance, top-of-book queue size and change, order-flow imbalance, taker flow,
 momentum, open-interest change, mark vs mid), a volatility regime, and a combined **order-flow index** with its expected move over the
-next 10 s to 2 minutes drawn on the chart. The HUD says which way price leans over that window; with Tether on it also
+next 10 s to 2 minutes drawn on the chart. The lean is grey below an index of 40, a softer colour from 40 and
+full colour from 60 ("strongly"), and dimmed in a wild market, where calls are least reliable. The HUD says which way price leans over that window; with Tether on it also
 names the papertrade side that's likelier to lose (see [Earning Paper with a hedge](#earning-paper-with-a-hedge)).
 See [Does it work?](#does-it-work) for how much that's worth. The chart also shows
 papertrade's bust price and Hyperliquid's liquidation price.
@@ -274,16 +304,21 @@ forecasts at every horizon to about 1e-6. Formulas are at the top of `src/flowin
 |---|---|
 | `src/hedge.js` | Hedge engine: one Tether lane per coin over a shared papertrade stream and Hyperliquid account read; rebalancing, key handling |
 | `src/exits.js` | Stop loss / take profit watcher (closes through papertrade's Close button) |
+| `src/pairs.js` | Delta-neutral pairs on papertrade: pairs the two fills, closes them together (auto close) |
+| `src/dncost.js` | Cost per Paper of a finished delta-neutral trade |
 | `src/safetynet.js` | Plans the reduce-only orders at papertrade's liquidation prices |
 | `src/papertrade.js` | Papertrade public endpoints: account stream, trading limits, open-interest room, win fee, deposit address |
 | `src/hl.js` | Hyperliquid client: idempotent orders (cloid + status check), leverage, transfers, approvals |
 | `src/market.js`, `src/flowindex.js` | Hyperliquid websocket → order-flow features and index (pure, tested) |
 | `src/vault.js` | Passphrase-encrypted key storage (non-extractable device key + AES-GCM) |
 | `content.js`, `hedge-ui.js` | HUD and chart layer; papertrade orders go through papertrade's own ticket and Close buttons |
+| `tpsl-ui.js` | Delta neutral and TP / SL blocks in papertrade's order ticket, TP/SL chips on positions, the cost toast |
 | `chart-bridge.js` | Reads papertrade's chart price/time mapping from its canvas draws (it has no public chart API) |
 
 Papertrade has no trading API you can sign for, so a stop loss or take profit closes the position by clicking
-papertrade's own Close button in your signed-in tab (Paper Route opens one if none is open). Tether only trades
+papertrade's own Close button in your signed-in tab (Paper Route opens one if none is open), and a delta-neutral
+hedge on papertrade is placed through its own order ticket right after your order. Each click uses an element
+only if exactly one matches, and a page self-check warns if papertrade's page changes. Tether only trades
 Hyperliquid, so it needs no papertrade tab.
 
 ## Risks
@@ -299,6 +334,10 @@ Hyperliquid, so it needs no papertrade tab.
 - **Browser dependence.** Hedging runs in your browser. See [Keep it running](#keep-it-running).
 - **Keys.** Your wallet key isn't stored. The trading key is kept in the extension (sealed to this browser); it
   can trade on your Hyperliquid account but can't withdraw. Revoke it on Hyperliquid's API page if needed.
+- **Delta neutral on papertrade.** Both legs wait in papertrade's queue, so they can fill at different times and
+  prices, and papertrade keeps part of every winning close while losses are paid in full, so a pair costs money
+  over time (the cost toast shows how much per Paper). At high leverage one leg can be liquidated; with auto close
+  the other is closed straight after.
 - **Index.** The order-flow index is a short-horizon statistical lean, not a signal that covers fees on its own.
 
 ## License

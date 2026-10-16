@@ -240,11 +240,20 @@
 
   // shared with tpsl-ui.js (same isolated world): engine snapshots and commands
   const snapListeners = [];
-  window.__prHedge = { send: (cmd, args) => send(cmd, args), snap: () => snap, onSnap: (fn) => snapListeners.push(fn), fit: (t) => hedgeFit(t) };
+  window.__prHedge = {
+    send: (cmd, args) => send(cmd, args),
+    snap: () => snap,
+    onSnap: (fn) => snapListeners.push(fn),
+    fit: (t) => hedgeFit(t),
+    ptOpen: (args) => ptOpen(args),
+    restoreTicket: (args) => restoreTicket(args),
+    placingOrder: () => placingOrder,
+    settle: (check, ms) => settle(check, ms),
+  };
 
   // Could Hyperliquid carry the hedge for papertrade's ticket, on top of what's already open?
   // Mirrors the checks hedgeLane runs before each order in src/hedge.js (keep in step): free margin
-  // on that side at the chosen leverage plus a cost buffer, max order and max hedge. Display only:
+  // on that side at the chosen leverage plus a cost buffer, and the optional max hedge. Display only:
   // it warns before the papertrade order instead of after it fills.
   const HL_COST_FRACTION = 0.001; // src/hedge.js
   function hedgeFit(t) {
@@ -253,16 +262,16 @@
     if (!t || !h || !pt || !(h.mid > 0)) return null;
     const lev = snap.settings.hlLeverage;
     const coin = snap.settings.coin;
+    if (snap.dn?.on && snap.dn.venue === "pt") return null; // hedged with papertrade itself: Hyperliquid isn't involved
     const ptAdd = ((t.isLong ? 1 : -1) * t.margin * t.leverage) / h.mid;
-    const target = -(pt.netSize + ptAdd);
+    const target = -(pt.netSize + ptAdd) * (snap.dn?.venue === "hl" ? snap.dn.coverage : 1);
     const delta = target - h.size;
     const flipping = h.size !== 0 && Math.sign(delta) !== Math.sign(h.size);
     const addingUsd = (flipping ? Math.max(0, Math.abs(delta) - Math.abs(h.size)) : Math.abs(delta)) * h.mid;
     const free = h.availableToTrade[delta > 0 ? 0 : 1];
     const perUsd = 1 / lev + HL_COST_FRACTION;
     const what = pt.netSize === 0 ? "this trade" : `another ${usdK(t.margin * t.leverage)} ${t.isLong ? "long" : "short"}`;
-    if (Math.abs(delta) * h.mid > snap.settings.maxOrderUsd) return { ok: false, text: `Hyperliquid won't hedge ${what}: the ${usdK(Math.abs(delta) * h.mid)} hedge order is over your ${usdK(snap.settings.maxOrderUsd)} max order (settings).` };
-    if (Math.abs(target) * h.mid > snap.settings.maxPositionUsd) return { ok: false, text: `Hyperliquid won't hedge ${what}: a ${usdK(Math.abs(target) * h.mid)} hedge is over your ${usdK(snap.settings.maxPositionUsd)} max hedge (settings).` };
+    if (snap.settings.maxHedgeUsd > 0 && Math.abs(target) * h.mid > snap.settings.maxHedgeUsd) return { ok: false, text: `Hyperliquid won't hedge ${what}: a ${usdK(Math.abs(target) * h.mid)} hedge is over the ${usdK(snap.settings.maxHedgeUsd)} max hedge you set (settings).` };
     if (addingUsd > free / perUsd + 1) {
       return { ok: false, text: `Hyperliquid can't hedge ${what}: it needs ${usd(addingUsd * perUsd, 0)} margin at ${lev}x and ${usd(free, 0)} is free. Raise Hyperliquid leverage or move USDC there.` };
     }
@@ -317,6 +326,48 @@
     const list = typeof found === "string" ? [...document.querySelectorAll(found)] : found;
     if (list.length !== 1) throw new Error(`${what}: ${list.length ? `${list.length} matches` : "not found"} (papertrade's page changed)`);
     return list[0];
+  }
+
+  // React tracks input values; the native setter + an input event is what a keystroke does
+  function setReactInput(input, value) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    setter.call(input, String(value));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // Places a papertrade order through its own ticket (the delta-neutral hedge leg on papertrade): select the
+  // side, set margin and leverage, click Place Trade. Every element must match exactly once.
+  let placingOrder = false; // our own Place Trade click: the ticket's capture listeners must ignore it
+  async function ptOpen({ coin, isLong, marginUsd, leverage }) {
+    if (!location.pathname.toLowerCase().includes(`/trade/${coin.toLowerCase()}`)) throw new Error(`Not on papertrade's ${coin} trade page`);
+    const sideBtn = one(isLong ? "button.dup" : "button.ddn", isLong ? "Long button" : "Short button");
+    const im = one("input#im", "margin input");
+    const il = one("input#il", "leverage input");
+    if (sideBtn.getAttribute("aria-pressed") !== "true") sideBtn.click();
+    if (Number(im.value) !== marginUsd) setReactInput(im, marginUsd);
+    if (Number(il.value) !== leverage) setReactInput(il, leverage);
+    const go = () => document.querySelectorAll("#go");
+    await settle(() => sideBtn.getAttribute("aria-pressed") === "true" && Number(im.value) === marginUsd && Number(il.value) === leverage && go().length === 1 && !go()[0].disabled, 2500);
+    if (sideBtn.getAttribute("aria-pressed") !== "true") throw new Error("Couldn't select the side on papertrade's ticket");
+    if (Number(im.value) !== marginUsd || Number(il.value) !== leverage) throw new Error(`Ticket shows $${im.value} × ${il.value}x, expected $${marginUsd} × ${leverage}x`);
+    const place = one("#go", "Place Trade button");
+    if (place.disabled) throw new Error(`Place Trade is disabled on papertrade for $${marginUsd} × ${leverage}x (balance, minimum size or trading paused)`);
+    placingOrder = true;
+    try {
+      place.click();
+    } finally {
+      placingOrder = false;
+    }
+    return { clicked: true, clickMs: Date.now() };
+  }
+
+  // after our own order, put the ticket back the way the user had it
+  async function restoreTicket({ isLong, marginUsd }) {
+    const sideBtn = document.querySelector(isLong ? "button.dup" : "button.ddn");
+    const im = document.getElementById("im");
+    if (sideBtn && sideBtn.getAttribute("aria-pressed") !== "true") sideBtn.click();
+    if (im && Number(im.value) !== marginUsd) setReactInput(im, marginUsd);
   }
 
   // "Close BTC position 123"; each row also has "Details for BTC position 123", which comes first
