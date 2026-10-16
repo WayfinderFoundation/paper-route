@@ -133,6 +133,9 @@ lose with. Paper Route holds the opposite position on Hyperliquid, so the pair i
 
 Papertrade's order ticket gets a **Delta neutral** block above TP / SL:
 
+It starts on **Papertrade at 100 %**, which needs no Hyperliquid wallet (if you already use Tether on a coin, that
+coin shows Hyperliquid).
+
 - **Hedge on: Hyperliquid** is Tether: Hyperliquid opens the opposite side when papertrade fills and closes it
   when papertrade closes.
 - **Hedge on: Papertrade** places an opposite papertrade order together with yours (same leverage). Both wait in

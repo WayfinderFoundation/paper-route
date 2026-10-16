@@ -280,6 +280,7 @@
     .pr-dn-open button:disabled { opacity: 0.5; cursor: default; }
     .pr-dn-err { font-size: 11.5px; color: #8b2020; }
     .pr-dn-err:empty { display: none; }
+    .pr-dn > .pr-dn-err { margin-top: 6px; }
     .pr-auto { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #2a2520; cursor: pointer; }
     .pr-auto input { margin: 0; accent-color: #8b2020; }
     .pr-offline { margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: #8b2020; color: #fff; font-size: 12px; font-weight: 600; }
@@ -421,8 +422,8 @@
   const dnOpen = document.createElement("div");
   dnOpen.className = "pr-dn-open";
   dnOpen.hidden = true;
-  dnBody.append(row("Hedge on", venueSeg), row("Coverage", coverSeg, "How much of the papertrade position the hedge covers"), dnOpen, dnErr);
-  dnBox.append(dnHead, dnBody);
+  dnBody.append(row("Hedge on", venueSeg), row("Coverage", coverSeg, "How much of the papertrade position the hedge covers"), dnOpen);
+  dnBox.append(dnHead, dnBody, dnErr); // errors show even when the block is closed (e.g. turning it on failed)
   dnOn.addEventListener("change", () => setDn({ on: dnOn.checked }));
 
   // with delta neutral: closing at a TP / SL closes both legs, unless switched off here

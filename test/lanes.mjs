@@ -211,6 +211,11 @@ console.log("\n# a Hyperliquid action that never returns can't block the engine"
   check(await until(() => e2.snapshot().alerts.some((a) => /timed out after/.test(a.text)), 4000), "the stuck order times out with an alert");
   check(await until(() => sizes.ETH === -1, 6000), `the hedge is retried and placed (ETH hedge ${sizes.ETH})`);
   check(e2.snapshot().busy === null && e2.snapshot().lanes.ETH.auto, "engine idle again, Tether still on");
+  await e2.setPageCoin({ coin: "BTC" });
+  const d = e2.snapshot().dn;
+  check(d.venue === "pt" && d.coverage === 1 && d.on === false, `a coin without Tether defaults to papertrade at 100 % (got ${d.venue} ${d.coverage})`);
+  await e2.setPageCoin({ coin: "ETH" });
+  check(e2.snapshot().dn.venue === "hl" && e2.snapshot().dn.on, "a coin already on Tether shows Hyperliquid, on");
 }
 
 console.log(failures ? `\n${failures} FAILED` : "\nALL PASS");
