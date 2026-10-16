@@ -107,8 +107,10 @@ export function createHedgeEngine({ publish, exec, io: ioOverrides = {} }) {
     emit();
   }
 
-  const DN_DEFAULT = { on: false, venue: "hl", coverage: 1, autoClose: true };
-  const dnOf = (coin) => ({ ...DN_DEFAULT, ...settings.dn?.[coin] });
+  // papertrade at 100 % unless chosen otherwise; someone already using Tether on a coin (set before these
+  // controls existed, or from the HUD) is on Hyperliquid
+  const DN_DEFAULT = { on: false, venue: "pt", coverage: 1, autoClose: true };
+  const dnOf = (coin) => ({ ...DN_DEFAULT, ...(lanes[coin]?.auto ? { venue: "hl" } : {}), ...settings.dn?.[coin] });
   // the Hyperliquid hedge covers this share of papertrade (1 unless delta neutral is set to less)
   const coverageOf = (coin) => (dnOf(coin).venue === "hl" ? dnOf(coin).coverage : 1);
   const leverageOf = (coin) => settings.leverage?.[coin] ?? { value: settings.hlLeverage, cross: settings.hlCross };
